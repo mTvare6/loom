@@ -1,4 +1,4 @@
-use crate::dsp::Biquad;
+use crate::dsp::LoomEngine;
 use crate::state::AudioState;
 use pipewire as pw;
 use pw::properties::properties;
@@ -16,7 +16,7 @@ pub fn run_audio_engine(shared_state: Arc<AudioState>) -> Result<(), pw::Error> 
     let context = pw::context::ContextRc::new(&mainloop, None)?;
     let core = context.connect_rc(None)?;
 
-    let ring_buffer = HeapRb::<f32>::new(16384);
+    let ring_buffer = HeapRb::<f32>::new(32768);
     let (mut producer, mut consumer) = ring_buffer.split();
 
     let capture_props = properties! {
@@ -56,10 +56,9 @@ pub fn run_audio_engine(shared_state: Arc<AudioState>) -> Result<(), pw::Error> 
 
     let playback_stream = pw::stream::StreamBox::new(&core, "loom_playback", playback_props)?;
 
-    let mut dsp_l = Biquad::new();
-    let mut dsp_r = Biquad::new();
-
+    let mut engine = LoomEngine::new(48000.0);
     let mut last_bass = -999.0_f32;
+    let mut last_spatial = -999.0_f32;
 
     let _playback_listener = playback_stream
         .add_local_listener::<i32>()
@@ -71,33 +70,36 @@ pub fn run_audio_engine(shared_state: Arc<AudioState>) -> Result<(), pw::Error> 
 
                 let live_volume = shared_state.volume();
                 let live_bass = shared_state.bass_db();
+                let live_spatial = shared_state.spatial_mix();
+                let is_bypassed = shared_state.is_bypassed();
 
-                if (live_bass - last_bass).abs() > 0.1 {
-                    dsp_l.set_low_shelf(48000.0, 120.0, live_bass);
-                    dsp_r.set_low_shelf(48000.0, 120.0, live_bass);
+                if !is_bypassed && (live_bass - last_bass).abs() > 0.1
+                    || (live_spatial - last_spatial).abs() > 0.01
+                {
+                    engine.update_params(live_spatial, live_bass);
                     last_bass = live_bass;
+                    last_spatial = live_spatial;
                 }
 
                 if let Some(out_slice) = datas[0].data() {
                     let available_samples = consumer.occupied_len();
-                    let bytes_to_write = (available_samples * 4).min(out_slice.len());
+                    let stereo_frames = (available_samples / 2).min(out_slice.len() / 8);
+                    let bytes_to_write = stereo_frames * 8;
                     let valid_out_slice = &mut out_slice[..bytes_to_write];
 
-                    let mut is_left_channel = true;
+                    for frame in valid_out_slice.chunks_exact_mut(8) {
+                        let sample_l = consumer.try_pop().unwrap_or(0.0);
+                        let sample_r = consumer.try_pop().unwrap_or(0.0);
 
-                    for out_bytes in valid_out_slice.chunks_exact_mut(4) {
-                        let mut sample = consumer.try_pop().unwrap_or(0.0);
-
-                        if is_left_channel {
-                            sample = dsp_l.process(sample);
+                        let (out_l, out_r) = if is_bypassed {
+                            (sample_l * live_volume, sample_r * live_volume)
                         } else {
-                            sample = dsp_r.process(sample);
-                        }
-                        is_left_channel = !is_left_channel;
+                            let (processed_l, processed_r) = engine.process(sample_l, sample_r);
+                            (processed_l * live_volume, processed_r * live_volume)
+                        };
 
-                        sample *= live_volume;
-
-                        out_bytes.copy_from_slice(&sample.to_le_bytes());
+                        frame[0..4].copy_from_slice(&out_l.to_le_bytes());
+                        frame[4..8].copy_from_slice(&out_r.to_le_bytes());
                     }
                     processed_bytes = bytes_to_write;
                 }
