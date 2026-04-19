@@ -11,13 +11,13 @@ use std::sync::Arc;
 
 pub fn run_audio_engine(shared_state: Arc<AudioState>) -> Result<(), pw::Error> {
     pw::init();
-
     let mainloop = pw::main_loop::MainLoopRc::new(None)?;
     let context = pw::context::ContextRc::new(&mainloop, None)?;
     let core = context.connect_rc(None)?;
 
     let ring_buffer = HeapRb::<f32>::new(32768);
     let (mut producer, mut consumer) = ring_buffer.split();
+
 
     let capture_props = properties! {
         *pw::keys::MEDIA_TYPE => "Audio",
@@ -30,17 +30,14 @@ pub fn run_audio_engine(shared_state: Arc<AudioState>) -> Result<(), pw::Error> 
 
     let _capture_listener = capture_stream
         .add_local_listener::<i32>()
-        .process(move |stream, _user_data| match stream.dequeue_buffer() {
+        .process(move |stream, _| match stream.dequeue_buffer() {
             None => return,
             Some(mut buffer) => {
                 let datas = buffer.datas_mut();
                 let valid_bytes = datas[0].chunk().size() as usize;
-
                 if let Some(in_slice) = datas[0].data() {
-                    let valid_slice = &in_slice[..valid_bytes];
-                    for in_bytes in valid_slice.chunks_exact(4) {
-                        let sample = f32::from_le_bytes(in_bytes.try_into().unwrap());
-                        let _ = producer.try_push(sample);
+                    for in_bytes in in_slice[..valid_bytes].chunks_exact(4) {
+                        let _ = producer.try_push(f32::from_le_bytes(in_bytes.try_into().unwrap()));
                     }
                 }
             }
@@ -57,51 +54,43 @@ pub fn run_audio_engine(shared_state: Arc<AudioState>) -> Result<(), pw::Error> 
     let playback_stream = pw::stream::StreamBox::new(&core, "loom_playback", playback_props)?;
 
     let mut engine = LoomEngine::new(48000.0);
-    let mut last_bass = -999.0_f32;
     let mut last_spatial = -999.0_f32;
 
     let _playback_listener = playback_stream
         .add_local_listener::<i32>()
-        .process(move |stream, _user_data| match stream.dequeue_buffer() {
+        .process(move |stream, _| match stream.dequeue_buffer() {
             None => return,
             Some(mut buffer) => {
                 let datas = buffer.datas_mut();
-                let mut processed_bytes = 0;
-
                 let live_volume = shared_state.volume();
-                let live_bass = shared_state.bass_db();
                 let live_spatial = shared_state.spatial_mix();
                 let is_bypassed = shared_state.is_bypassed();
 
-                if !is_bypassed && (live_bass - last_bass).abs() > 0.1
-                    || (live_spatial - last_spatial).abs() > 0.01
-                {
-                    engine.update_params(live_spatial, live_bass);
-                    last_bass = live_bass;
+                if !is_bypassed && (live_spatial - last_spatial).abs() > 0.01 {
+                    engine.update_params(live_spatial);
                     last_spatial = live_spatial;
                 }
 
+                let mut processed_bytes = 0;
                 if let Some(out_slice) = datas[0].data() {
-                    let available_samples = consumer.occupied_len();
-                    let stereo_frames = (available_samples / 2).min(out_slice.len() / 8);
-                    let bytes_to_write = stereo_frames * 8;
-                    let valid_out_slice = &mut out_slice[..bytes_to_write];
+                    let stereo_frames = (consumer.occupied_len() / 2).min(out_slice.len() / 8);
+                    let valid_out_slice = &mut out_slice[..stereo_frames * 8];
 
                     for frame in valid_out_slice.chunks_exact_mut(8) {
-                        let sample_l = consumer.try_pop().unwrap_or(0.0);
-                        let sample_r = consumer.try_pop().unwrap_or(0.0);
+                        let l = consumer.try_pop().unwrap_or(0.0);
+                        let r = consumer.try_pop().unwrap_or(0.0);
 
                         let (out_l, out_r) = if is_bypassed {
-                            (sample_l * live_volume, sample_r * live_volume)
+                            (l * live_volume, r * live_volume)
                         } else {
-                            let (processed_l, processed_r) = engine.process(sample_l, sample_r);
-                            (processed_l * live_volume, processed_r * live_volume)
+                            let (pl, pr) = engine.process(l, r);
+                            (pl * live_volume, pr * live_volume)
                         };
 
                         frame[0..4].copy_from_slice(&out_l.to_le_bytes());
                         frame[4..8].copy_from_slice(&out_r.to_le_bytes());
                     }
-                    processed_bytes = bytes_to_write;
+                    processed_bytes = stereo_frames * 8;
                 }
 
                 let chunk = datas[0].chunk_mut();
@@ -125,21 +114,18 @@ pub fn run_audio_engine(shared_state: Arc<AudioState>) -> Result<(), pw::Error> 
         id: pw::spa::param::ParamType::EnumFormat.as_raw(),
         properties: audio_info.into(),
     };
-
-    let values: Vec<u8> = pw::spa::pod::serialize::PodSerializer::serialize(
+    let values = pw::spa::pod::serialize::PodSerializer::serialize(
         std::io::Cursor::new(Vec::new()),
         &pw::spa::pod::Value::Object(obj),
     )
     .unwrap()
     .0
     .into_inner();
-
     let mut params = [pw::spa::pod::Pod::from_bytes(&values).unwrap()];
 
     let flags = pw::stream::StreamFlags::AUTOCONNECT
         | pw::stream::StreamFlags::MAP_BUFFERS
         | pw::stream::StreamFlags::RT_PROCESS;
-
     capture_stream.connect(pw::spa::utils::Direction::Input, None, flags, &mut params)?;
     playback_stream.connect(pw::spa::utils::Direction::Output, None, flags, &mut params)?;
 
