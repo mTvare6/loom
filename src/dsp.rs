@@ -63,11 +63,22 @@ impl Biquad {
         self.a2 = (1.0 - alpha) / a0;
     }
 
+    pub fn set_peaking(&mut self, sr: f32, freq: f32, q: f32, gain_db: f32) {
+        let a = f32::powf(10.0, gain_db / 40.0);
+        let w0 = 2.0 * PI * freq / sr;
+        let alpha = w0.sin() / (2.0 * q);
+        let a0 = 1.0 + alpha / a;
+        self.b0 = (1.0 + alpha * a) / a0;
+        self.b1 = (-2.0 * w0.cos()) / a0;
+        self.b2 = (1.0 - alpha * a) / a0;
+        self.a1 = (-2.0 * w0.cos()) / a0;
+        self.a2 = (1.0 - alpha / a) / a0;
+    }
+
     pub fn set_high_shelf(&mut self, sr: f32, freq: f32, gain_db: f32) {
         let a = f32::powf(10.0, gain_db / 40.0);
         let w0 = 2.0 * PI * freq / sr;
         let alpha = w0.sin() / 2.0 * SQRT_2;
-
         let a0 = (a + 1.0) - (a - 1.0) * w0.cos() + 2.0 * a.sqrt() * alpha;
         self.b0 = (a * ((a + 1.0) + (a - 1.0) * w0.cos() + 2.0 * a.sqrt() * alpha)) / a0;
         self.b1 = (-2.0 * a * ((a - 1.0) + (a + 1.0) * w0.cos())) / a0;
@@ -132,114 +143,161 @@ impl<const N: usize> DelayLine<N> {
         self.write_idx = (self.write_idx + 1) & (N - 1);
         out
     }
+
+    // Fractional interpolation for between samples generated in steps like LFO
+    // instead of rounded version approximations
+    #[inline(always)]
+    fn process_frac(&mut self, x: f32, delay_samples: f32) -> f32 {
+        self.buffer[self.write_idx] = x;
+
+        let d_int = delay_samples.trunc() as usize;
+        let frac = delay_samples.fract();
+
+        let idx1 = self.write_idx.wrapping_sub(d_int) & (N - 1);
+        let idx2 = self.write_idx.wrapping_sub(d_int + 1) & (N - 1);
+
+        let out = self.buffer[idx1] * (1.0 - frac) + self.buffer[idx2] * frac;
+
+        self.write_idx = (self.write_idx + 1) & (N - 1);
+        out
+    }
+}
+
+// Tiny delay offset for the center channel
+// https://en.wikipedia.org/wiki/Sound_localization#Duplex_theory
+struct MicroITD {
+    delay: DelayLine<128>,
+    delay_samples: f32,
+}
+
+impl MicroITD {
+    fn new(sr: f32, ms: f32) -> Self {
+        Self {
+            delay: DelayLine::new(),
+            delay_samples: ms * sr / 1000.0,
+        }
+    }
+
+    #[inline(always)]
+    fn process(&mut self, x: f32) -> f32 {
+        self.delay.process_frac(x, self.delay_samples)
+    }
+}
+
+// https://en.wikipedia.org/wiki/Acoustic_shadow
+// Head blocks high freq from going to opp side
+struct Crossfeed {
+    delay: DelayLine<1024>,
+    samples: usize,
+    shelf: Biquad,
+}
+
+impl Crossfeed {
+    fn new(sr: f32, delay_ms: f32, cutoff: f32) -> Self {
+        let mut shelf = Biquad::new();
+        shelf.set_high_shelf(sr, cutoff, -12.0);
+        Self {
+            delay: DelayLine::new(),
+            samples: (delay_ms * sr / 1000.0) as usize,
+            shelf,
+        }
+    }
+
+    #[inline(always)]
+    fn process(&mut self, x: f32) -> f32 {
+        self.shelf.process(self.delay.process(x, self.samples))
+    }
 }
 
 pub struct LoomEngine {
     cross1_l: LR4,
     cross1_r: LR4,
-    haas_delay: DelayLine<1024>,
-    delay_samples: usize,
-    air_eq_l: Biquad,
-    air_eq_r: Biquad,
+    cross2_l: LR4,
+    cross2_r: LR4,
+
+    pinna_notch: Biquad,
+    center_itd: MicroITD,
+
+    xf_l: Crossfeed,
+    xf_r: Crossfeed,
+
     intensity: f32,
 }
 
 impl LoomEngine {
-    pub fn new(sample_rate: f32) -> Self {
-        let delay_samples = ((15.0 / 1000.0) * sample_rate).round() as usize;
+    pub fn new(sr: f32) -> Box<Self> {
+        let mut pinna_notch = Biquad::new();
 
-        Self {
-            cross1_l: LR4::new(sample_rate, 120.0),
-            cross1_r: LR4::new(sample_rate, 120.0),
-            haas_delay: DelayLine::new(),
-            delay_samples,
-            air_eq_l: Biquad::new(),
-            air_eq_r: Biquad::new(),
+        // NOTE: Brings audible difference to non musical tones like speech/footsteps/game audio
+        // by bringing it more forward
+        pinna_notch.set_peaking(sr, 7500.0, 1.2, -6.0);
+
+        Box::new(Self {
+            cross1_l: LR4::new(sr, 120.0),
+            cross1_r: LR4::new(sr, 120.0),
+            cross2_l: LR4::new(sr, 4000.0),
+            cross2_r: LR4::new(sr, 4000.0),
+
+            pinna_notch,
+            center_itd: MicroITD::new(sr, 0.15),
+
+            xf_l: Crossfeed::new(sr, 0.25, 700.0),
+            xf_r: Crossfeed::new(sr, 0.25, 700.0),
+
             intensity: 0.0,
-        }
+        })
     }
 
     pub fn update_params(&mut self, intensity: f32) {
         self.intensity = intensity;
-
-        let air_db = intensity * 4.5;
-
-        // Boost above 10kHz
-        self.air_eq_l.set_high_shelf(48000.0, 10000.0, air_db);
-        self.air_eq_r.set_high_shelf(48000.0, 10000.0, air_db);
     }
 
-    #[inline(always)]
+    // Saturates nicely instead of harsh hollow feeling
     // https://www.elementary.audio/docs/tutorials/distortion-saturation-wave-shaping
-    fn parallel_exciter(x: f32, drive: f32) -> f32 {
-        let wet = (x * drive).tanh();
-        (x * 0.7) + (wet * 0.3)
+    #[inline(always)]
+    fn limit_side(x: f32) -> f32 {
+        let x_clamp = x.clamp(-1.5, 1.5);
+        x_clamp - (x_clamp * x_clamp * x_clamp) / 3.0
     }
 
     pub fn process(&mut self, in_l: f32, in_r: f32) -> (f32, f32) {
         if self.intensity <= 0.01 {
-            let l = self.air_eq_l.process(in_l);
-            let r = self.air_eq_r.process(in_r);
-            return (l, r);
+            return (in_l, in_r);
         }
 
-        let (low_l, high_l) = self.cross1_l.process(in_l);
-        let (low_r, high_r) = self.cross1_r.process(in_r);
+        let (low_l, midhigh_l) = self.cross1_l.process(in_l);
+        let (low_r, midhigh_r) = self.cross1_r.process(in_r);
+        let (mid_l, high_l) = self.cross2_l.process(midhigh_l);
+        let (mid_r, high_r) = self.cross2_r.process(midhigh_r);
 
         // Low frequencies are non directional due to wavelengths longer
         // than the size of head mono reduces cancellation and phase going bad
-        // https://en.wikipedia.org/wiki/Sound_localization
-        // https://en.wikipedia.org/wiki/Psychoacoustics
         let out_low = (low_l + low_r) * 0.5 * (1.0 + self.intensity * 0.6);
 
-        // https://en.wikipedia.org/wiki/Joint_stereo#M/S_stereo_coding
+        // Head shadowing crossfeed
+        let out_mid_l = mid_l + (self.xf_r.process(mid_r) * self.intensity * 0.4);
+        let out_mid_r = mid_r + (self.xf_l.process(mid_l) * self.intensity * 0.4);
+
         let mid = (high_l + high_r) * 0.5;
-        let mut side = (high_l - high_r) * 0.5;
+        let side = (high_l - high_r) * 0.5;
 
-        // High-frequencies attenuations are used to intuit angle and distance
-        // Increasing the air part more on the side makes it feel wider
-        // https://en.wikipedia.org/wiki/Psychoacoustics#Sound_localization
-        side = self.air_eq_r.process(side);
+        // Brings audible difference to non musical tones like speech footsteps game audio
+        // by bringing it more forward
+        let mid_eq = self.pinna_notch.process(mid);
+        let mid_eq_l = self.center_itd.process(mid_eq);
+        let mid_eq_r = mid_eq;
 
-        let width_boost = 1.0 + (self.intensity * 2.0);
-        side *= width_boost;
+        // Simple static widening for now (Decorrelator comes next)
+        let width_gain = 1.0 + self.intensity * 1.5;
+        let side_l = Self::limit_side(side * width_gain * (1.0 + self.intensity * 2.0));
+        let side_r = Self::limit_side(-side * width_gain * (1.0 + self.intensity * 2.0));
 
-        // https://en.wikipedia.org/wiki/Precedence_effect
-        let delayed_side = self.haas_delay.process(side, self.delay_samples);
+        let out_high_l = mid_eq_l + side_l;
+        let out_high_r = mid_eq_r - side_r;
 
-        // Terminology: DRY = current
-        // Mixes dry (more dom) with delayed increasing the spatial tendency
-        let processed_side = (side * 0.7) + (delayed_side * self.intensity * 0.5);
-
-        let mut out_l = mid + processed_side;
-        let mut out_r = mid - processed_side;
-
-        // Add the dynamically scaled mono bass back in
-        out_l += out_low;
-        out_r += out_low;
-
-        // More 2nd and 3rd order harmonics
-        // Artificially reconstructs a deeper fundamental bass frequency when heard by brain
-        // https://en.wikipedia.org/wiki/Missing_fundamental
-        // https://www.soundonsound.com/techniques/all-about-exciters-enhancers
-        // https://www.elementary.audio/docs/tutorials/distortion-saturation-wave-shaping
-        // https://dsp.stackexchange.com/questions/17526/how-to-model-tape-saturation-audio-dsp
-        // https://mural.maynoothuniversity.ie/id/eprint/4099/1/EAApaper-JT-30-03.pdf
-        let drive = 1.0 + (self.intensity * 4.0);
-        out_l = Self::parallel_exciter(out_l, drive);
-        out_r = Self::parallel_exciter(out_r, drive);
-
-        // Hearing at extreme lows and highs is bad, too bad at lower volumes
-        // Dynamically compensate for it
-        // https://en.wikipedia.org/wiki/Equal-loudness_contour
-        // Smile EQ
-        // \  -     -  /
-        //  \         /
-        //   \_______/
-        // 100Hz   10kHz
-        out_l = self.air_eq_l.process(out_l);
-        out_r = self.air_eq_r.process(out_r);
-
-        (out_l, out_r)
+        (
+            out_low + out_mid_l + out_high_l,
+            out_low + out_mid_r + out_high_r,
+        )
     }
 }
