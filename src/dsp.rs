@@ -145,7 +145,7 @@ impl<const N: usize> DelayLine<N> {
     }
 
     // Fractional interpolation for between samples generated in steps like LFO
-    // instead of rounded version approximations
+    // instead of unded rounded version approximations
     #[inline(always)]
     fn process_frac(&mut self, x: f32, delay_samples: f32) -> f32 {
         self.buffer[self.write_idx] = x;
@@ -184,8 +184,8 @@ impl MicroITD {
     }
 }
 
-// https://en.wikipedia.org/wiki/Acoustic_shadow
 // Head blocks high freq from going to opp side
+// https://en.wikipedia.org/wiki/Acoustic_shadow
 struct Crossfeed {
     delay: DelayLine<1024>,
     samples: usize,
@@ -209,6 +209,100 @@ impl Crossfeed {
     }
 }
 
+// https://en.wikipedia.org/wiki/Decorrelation
+// Breaks mono coherence by shifting phase
+struct ModAllPass {
+    delay: DelayLine<2048>,
+    base_delay: f32,
+    mod_depth: f32,
+    coeff: f32,
+    lfo_phase: f32,
+    lfo_inc: f32,
+}
+
+impl ModAllPass {
+    fn new(sr: f32, ms: f32, depth_ms: f32, rate_hz: f32, coeff: f32) -> Self {
+        Self {
+            delay: DelayLine::new(),
+            base_delay: ms * sr / 1000.0,
+            mod_depth: depth_ms * sr / 1000.0,
+            coeff,
+            lfo_phase: 0.0,
+            lfo_inc: 2.0 * PI * rate_hz / sr,
+        }
+    }
+
+    #[inline(always)]
+    fn process(&mut self, x: f32) -> f32 {
+        let current_delay = self.base_delay + (self.lfo_phase.sin() * self.mod_depth);
+
+        self.lfo_phase += self.lfo_inc;
+        // HACK: to improve performance just substract instead of div
+        if self.lfo_phase >= 2.0 * PI {
+            self.lfo_phase -= 2.0 * PI;
+        }
+
+        let delayed = self.delay.process_frac(x, current_delay);
+        let out = delayed - self.coeff * x;
+        self.delay.buffer[(self.delay.write_idx.wrapping_sub(1)) & 2047] = x + self.coeff * delayed;
+        out
+    }
+}
+
+// Brain uses the delay between enchoes to intuit room size and angle of audio
+// https://en.wikipedia.org/wiki/Precedence_effect
+#[derive(Copy, Clone)]
+struct ERTap {
+    samples: usize,
+    gain: f32,
+    alpha: f32,
+    state: f32,
+}
+
+struct EarlyReflections {
+    delay: DelayLine<4096>,
+    taps: [ERTap; 6],
+}
+
+impl EarlyReflections {
+    fn new(sr: f32, configs: &[(f32, f32, f32)]) -> Self {
+        let mut taps = [ERTap {
+            samples: 0,
+            gain: 0.0,
+            alpha: 1.0,
+            state: 0.0,
+        }; 6];
+        for (i, &(ms, g, c)) in configs.iter().enumerate() {
+            let dt = 1.0 / sr;
+            let rc = 1.0 / (2.0 * PI * c);
+            taps[i] = ERTap {
+                samples: (ms * sr / 1000.0) as usize,
+                gain: g,
+                alpha: dt / (rc + dt),
+                state: 0.0,
+            };
+        }
+        Self {
+            delay: DelayLine::new(),
+            taps,
+        }
+    }
+
+    #[inline(always)]
+    fn process(&mut self, x: f32) -> f32 {
+        self.delay.buffer[self.delay.write_idx] = x;
+        let mut out = 0.0;
+        for tap in self.taps.iter_mut() {
+            let read_idx = self.delay.write_idx.wrapping_sub(tap.samples) & 4095;
+            // Wall damping on later bounces and air damping too
+            tap.state = tap.state + tap.alpha * (self.delay.buffer[read_idx] - tap.state);
+            out += tap.state * tap.gain;
+        }
+        self.delay.write_idx = (self.delay.write_idx + 1) & 4095;
+        out
+    }
+}
+
 pub struct LoomEngine {
     cross1_l: LR4,
     cross1_r: LR4,
@@ -220,12 +314,37 @@ pub struct LoomEngine {
 
     xf_l: Crossfeed,
     xf_r: Crossfeed,
+    decorr_l: ModAllPass,
+    decorr_r: ModAllPass,
+    er_l: EarlyReflections,
+    er_r: EarlyReflections,
 
+    transient_env: f32,
+    attack_coef: f32,
+    release_coef: f32,
     intensity: f32,
 }
 
 impl LoomEngine {
     pub fn new(sr: f32) -> Box<Self> {
+        // Taps are delay ms then gain then air absorption LPF Hz
+        let t_l = [
+            (7.0, 0.45, 12000.0),
+            (13.0, 0.35, 8000.0),
+            (19.0, 0.25, 5000.0),
+            (23.0, 0.20, 3000.0),
+            (31.0, 0.15, 2000.0),
+            (41.0, 0.10, 1000.0),
+        ];
+        let t_r = [
+            (11.0, 0.45, 12000.0),
+            (17.0, 0.35, 8000.0),
+            (29.0, 0.25, 5000.0),
+            (37.0, 0.20, 3000.0),
+            (43.0, 0.15, 2000.0),
+            (47.0, 0.10, 1000.0),
+        ];
+
         let mut pinna_notch = Biquad::new();
 
         // NOTE: Brings audible difference to non musical tones like speech/footsteps/game audio
@@ -244,6 +363,16 @@ impl LoomEngine {
             xf_l: Crossfeed::new(sr, 0.25, 700.0),
             xf_r: Crossfeed::new(sr, 0.25, 700.0),
 
+            // Dual decorrelators with out of phase LFOs for more natuural phase drift
+            decorr_l: ModAllPass::new(sr, 2.5, 0.5, 0.15, 0.6),
+            decorr_r: ModAllPass::new(sr, 3.1, 0.7, 0.11, 0.6),
+
+            er_l: EarlyReflections::new(sr, &t_l),
+            er_r: EarlyReflections::new(sr, &t_r),
+
+            transient_env: 0.0,
+            attack_coef: (-1.0 / (2.0 * 0.001 * sr)).exp(),
+            release_coef: (-1.0 / (50.0 * 0.001 * sr)).exp(),
             intensity: 0.0,
         })
     }
@@ -270,6 +399,20 @@ impl LoomEngine {
         let (mid_l, high_l) = self.cross2_l.process(midhigh_l);
         let (mid_r, high_r) = self.cross2_r.process(midhigh_r);
 
+        // https://en.wikipedia.org/wiki/Envelope_detector
+        // When a sharp sound happens reduce the side mult to not muddle
+        let mid_mono = (mid_l + mid_r) * 0.5;
+        let peak = mid_mono.abs();
+
+        let coef = if peak > self.transient_env {
+            self.attack_coef
+        } else {
+            self.release_coef
+        };
+
+        self.transient_env = coef * (self.transient_env - peak) + peak;
+        let dynamic_width_mod = 1.0 - (self.transient_env * 2.0).clamp(0.0, 0.6);
+
         // Low frequencies are non directional due to wavelengths longer
         // than the size of head mono reduces cancellation and phase going bad
         let out_low = (low_l + low_r) * 0.5 * (1.0 + self.intensity * 0.6);
@@ -287,13 +430,26 @@ impl LoomEngine {
         let mid_eq_l = self.center_itd.process(mid_eq);
         let mid_eq_r = mid_eq;
 
-        // Simple static widening for now (Decorrelator comes next)
-        let width_gain = 1.0 + self.intensity * 1.5;
-        let side_l = Self::limit_side(side * width_gain * (1.0 + self.intensity * 2.0));
-        let side_r = Self::limit_side(-side * width_gain * (1.0 + self.intensity * 2.0));
+        let mut side_l = self.decorr_l.process(side);
+        let mut side_r = self.decorr_r.process(-side);
 
-        let out_high_l = mid_eq_l + side_l;
-        let out_high_r = mid_eq_r - side_r;
+        // More 2nd and 3rd order harmonics
+        // Makes the frequencies more audible and distinct
+        // https://en.wikipedia.org/wiki/Missing_fundamental
+        // https://www.soundonsound.com/techniques/all-about-exciters-enhancers
+        // https://www.elementary.audio/docs/tutorials/distortion-saturation-wave-shaping
+        let width_gain = (1.0 + self.intensity * 1.5) * dynamic_width_mod;
+        side_l = Self::limit_side(side_l * width_gain * (1.0 + self.intensity * 2.0));
+        side_r = Self::limit_side(side_r * width_gain * (1.0 + self.intensity * 2.0));
+
+        let wide_high_l = mid_eq_l + side_l;
+        let wide_high_r = mid_eq_r - side_r;
+
+        let er_l = self.er_l.process(wide_high_l);
+        let er_r = self.er_r.process(wide_high_r);
+
+        let out_high_l = wide_high_l + (er_l * self.intensity * 0.7);
+        let out_high_r = wide_high_r + (er_r * self.intensity * 0.7);
 
         (
             out_low + out_mid_l + out_high_l,
