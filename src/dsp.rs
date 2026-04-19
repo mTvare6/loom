@@ -107,8 +107,7 @@ impl LoomEngine {
 
         let air_db = intensity * 4.5;
 
-
-        // Boost below 110Hz 
+        // Boost below 110Hz
         self.bass_eq_l.set_low_shelf(48000.0, 110.0, bass_db);
         self.bass_eq_r.set_low_shelf(48000.0, 110.0, bass_db);
 
@@ -118,10 +117,10 @@ impl LoomEngine {
     }
 
     #[inline(always)]
-    fn soft_clip(x: f32, drive: f32) -> f32 {
-        // harmonic exciter (smooth overdrive)
-        let driven = x * (1.0 + drive);
-        driven / (1.0 + driven.abs())
+    // https://www.elementary.audio/docs/tutorials/distortion-saturation-wave-shaping
+    fn parallel_exciter(x: f32, drive: f32) -> f32 {
+        let wet = (x * drive).tanh();
+        (x * 0.7) + (wet * 0.3)
     }
 
     pub fn process(&mut self, in_l: f32, in_r: f32) -> (f32, f32) {
@@ -131,16 +130,24 @@ impl LoomEngine {
             return (l, r);
         }
 
-        // Mid side matrix
-        let mid = (in_l + in_r) * 0.5;
+        // https://en.wikipedia.org/wiki/Joint_stereo#M/S_stereo_coding
+        let mut mid = (in_l + in_r) * 0.5;
         let mut side = (in_l - in_r) * 0.5;
 
-        // Widen the side making the difference more effective
-        // https://en.wikipedia.org/wiki/Stereophonic_sound#Common_usage
-        let width_boost = 1.0 + (self.intensity * 1.5);
+        // Low frequencies are non directional due to wavelengths longer
+        // than the size of head mono reduces cancellation and phase going bad
+        // https://en.wikipedia.org/wiki/Sound_localization
+        // https://en.wikipedia.org/wiki/Psychoacoustics
+        mid = self.bass_eq_l.process(mid);
+
+        // High-frequencies attenuations are used to intuit angle and distance
+        // Increasing the air part more on the side makes it feel wider
+        // https://en.wikipedia.org/wiki/Psychoacoustics#Sound_localization
+        side = self.air_eq_r.process(side);
+
+        let width_boost = 1.0 + (self.intensity * 2.0);
         side *= width_boost;
 
-        // Haas decorrelation
         // https://en.wikipedia.org/wiki/Precedence_effect
         let delayed_side = self.delay_buffer[self.read_idx];
         self.delay_buffer[self.write_idx] = side;
@@ -151,19 +158,25 @@ impl LoomEngine {
 
         // Terminology: DRY = current
         // Mixes dry (more dom) with delayed increasing the spatial tendency
-        let processed_side = (side * 0.6) + (delayed_side * self.intensity * 0.4);
+        let processed_side = (side * 0.7) + (delayed_side * self.intensity * 0.5);
 
-        // Mix the processed sides
         let mut out_l = mid + processed_side;
         let mut out_r = mid - processed_side;
 
+        // More 2nd and 3rd order harmonics
+        // Artificially reconstructs a deeper fundamental bass frequency when heard by brain
+        // https://en.wikipedia.org/wiki/Missing_fundamental
+        // https://www.soundonsound.com/techniques/all-about-exciters-enhancers
         // https://www.elementary.audio/docs/tutorials/distortion-saturation-wave-shaping
         // https://dsp.stackexchange.com/questions/17526/how-to-model-tape-saturation-audio-dsp
-        // https://mural.maynoothuniversity.ie/id/eprint/4099/1/EAApaper-JT-30-03.pdf?utm_source=chatgpt.com
-        let drive = self.intensity * 0.8;
-        out_l = Self::soft_clip(out_l, drive);
-        out_r = Self::soft_clip(out_r, drive);
+        // https://mural.maynoothuniversity.ie/id/eprint/4099/1/EAApaper-JT-30-03.pdf
+        let drive = 1.0 + (self.intensity * 4.0);
+        out_l = Self::parallel_exciter(out_l, drive);
+        out_r = Self::parallel_exciter(out_r, drive);
 
+        // Hearing at extreme lows and highs is bad, too bad at lower volumes
+        // Dynamically compensate for it
+        // https://en.wikipedia.org/wiki/Equal-loudness_contour
         // Smile EQ
         // \  -     -  /
         //  \         /
