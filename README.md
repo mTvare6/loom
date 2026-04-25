@@ -5,6 +5,7 @@ Real‑time audio processor built with PipeWire which makes a filter, applying a
 ### Features
 - Low‑shelf biquad filter for bass boost
 - egui control panel (master volume + bass)
+- MIT HRTFs for direction audio beyond psychoacoustics
 
 ### Libraries
 PipeWire dev headers on your distro
@@ -19,6 +20,3 @@ cargo run --release
 ### Usage
 - Route audio into the `loom_virtual_sink` using [qpwgraph](https://github.com/rncbc/qpwgraph)
 - Adjust master volume and bass in the GUI
-
-### Caveats
-- No persistence (settings reset everytime)
