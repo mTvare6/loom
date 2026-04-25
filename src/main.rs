@@ -1,6 +1,7 @@
 mod audio;
 mod dsp;
 mod gui;
+mod hrtf;
 mod state;
 
 use state::AudioState;

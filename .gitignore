@@ -1,1 +1,8 @@
 /target
+full/*
+!full/elev0/
+full/elev0/*
+!full/elev0/L0e030a.wav
+!full/elev0/L0e330a.wav
+!full/elev0/R0e030a.wav
+!full/elev0/R0e330a.wav

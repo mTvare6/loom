@@ -1,3 +1,4 @@
+use crate::hrtf::HrtfRenderer;
 use std::f32::consts::{PI, SQRT_2};
 
 // https://webaudio.github.io/Audio-EQ-Cookbook/audio-eq-cookbook.html
@@ -419,6 +420,9 @@ pub struct LoomEngine {
     er_l: EarlyReflections,
     er_r: EarlyReflections,
     room: StereoRoom,
+    hrtf: HrtfRenderer,
+    dry_delay_l: DelayLine<256>,
+    dry_delay_r: DelayLine<256>,
 
     transient_env: f32,
     attack_coef: f32,
@@ -471,6 +475,9 @@ impl LoomEngine {
             er_l: EarlyReflections::new(sr, &t_l),
             er_r: EarlyReflections::new(sr, &t_r),
             room: StereoRoom::new(sr),
+            hrtf: HrtfRenderer::new(sr),
+            dry_delay_l: DelayLine::new(),
+            dry_delay_r: DelayLine::new(),
 
             transient_env: 0.0,
             attack_coef: (-1.0 / (2.0 * 0.001 * sr)).exp(),
@@ -492,8 +499,14 @@ impl LoomEngine {
     }
 
     pub fn process(&mut self, in_l: f32, in_r: f32) -> (f32, f32) {
+        // Match the dry path to the HRTF block latency.
+        let dry_l = self.dry_delay_l.process(in_l, 128);
+        let dry_r = self.dry_delay_r.process(in_r, 128);
+
         if self.intensity <= 0.01 {
-            return (in_l, in_r);
+            // Keep the convolver warm while inactive.
+            self.hrtf.process(in_l, in_r);
+            return (dry_l, dry_r);
         }
 
         let (low_l, midhigh_l) = self.cross1_l.process(in_l);
@@ -559,9 +572,16 @@ impl LoomEngine {
         let out_high_r =
             wide_high_r + (er_r * self.intensity * 0.7) + (tail_r * self.intensity * 0.15);
 
+        let processed_l = out_low + out_mid_l + out_high_l;
+        let processed_r = out_low + out_mid_r + out_high_r;
+        let (binaural_l, binaural_r) = self.hrtf.process(processed_l, processed_r);
+
+        // Crossfade latency-aligned dry and binaural signals.
+        let wet = self.intensity.clamp(0.0, 1.0);
+        let dry = 1.0 - wet;
         (
-            out_low + out_mid_l + out_high_l,
-            out_low + out_mid_r + out_high_r,
+            dry_l * dry + binaural_l * wet,
+            dry_r * dry + binaural_r * wet,
         )
     }
 }
