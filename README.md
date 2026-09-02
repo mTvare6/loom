@@ -1,13 +1,10 @@
 # loom
 
-Real‑time audio processor built with PipeWire which makes a filter, applying a low‑shelf biquad (bass boost) in a lock‑free ring buffer, and shared atomic state between GUI written in egui and audio processor for lock free parameter config.
-
-### Features
-- Low‑shelf biquad filter for bass boost
-- egui control panel (master volume + bass)
+A realtime stereo spatialised spatial audio processor (using crossfeed, decorrelation, early reflections and reverb) built with pipewire-rs and egui.
 
 ### Libraries
-PipeWire dev headers on your distro
+
+PipeWire devel headers for your distro.
 
 ### Building & Running
 
@@ -17,8 +14,11 @@ cargo run --release
 ```
 
 ### Usage
-- Route audio into the `loom_virtual_sink` using [qpwgraph](https://github.com/rncbc/qpwgraph)
-- Adjust master volume and bass in the GUI
 
-### Caveats
-- No persistence (settings reset everytime)
+Route audio into the `loom_virtual_sink` inputs using [qpwgraph](https://github.com/rncbc/qpwgraph)
+
+### Roadmap
+
+- [ ] Persistence
+- [ ] Explore more techniques and sound as addictive as [Boom3d](https://www.globaldelight.com/boom/)
+- [ ] Non-RT features
