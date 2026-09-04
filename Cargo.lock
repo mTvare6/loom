@@ -2665,7 +2665,19 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "saq-pipewire",
+]
+
+[[package]]
+name = "saq-dsp"
+version = "0.1.0"
+
+[[package]]
+name = "saq-pipewire"
+version = "0.1.0"
+dependencies = [
  "pipewire",
+ "saq-dsp",
 ]
 
 [[package]]

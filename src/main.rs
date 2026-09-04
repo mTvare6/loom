@@ -1,5 +1,3 @@
-mod audio;
-mod dsp;
 mod gui;
 mod state;
 
@@ -11,7 +9,7 @@ fn main() -> eframe::Result<()> {
 
     let audio_state = shared_state.clone();
     std::thread::spawn(move || {
-        audio::run_audio_engine(audio_state).expect("Śaq crashed");
+        saq_pipewire::run_audio_engine(audio_state).expect("Śaq crashed");
     });
 
     gui::run_gui(shared_state)

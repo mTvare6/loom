@@ -1,0 +1,8 @@
+[package]
+name = "saq-pipewire"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+saq-dsp = { path = "../saq-dsp" }
+pipewire = { path = "../../../pipewire-rs/pipewire" }

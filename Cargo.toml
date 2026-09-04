@@ -3,7 +3,11 @@ name = "saq"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["crates/saq-dsp", "crates/saq-pipewire"]
+resolver = "3"
+
 [dependencies]
 eframe = "0.33.3"
 egui = "0.33.3"
-pipewire = { path = "../pipewire-rs/pipewire" }
+saq-pipewire = { path = "crates/saq-pipewire" }
