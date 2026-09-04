@@ -1,0 +1,8 @@
+[package]
+name = "loom-pipewire"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+loom-dsp = { path = "../loom-dsp" }
+pipewire = { path = "../../../pipewire-rs/pipewire" }

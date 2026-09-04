@@ -1791,6 +1791,18 @@ version = "0.1.0"
 dependencies = [
  "eframe",
  "egui",
+ "loom-pipewire",
+]
+
+[[package]]
+name = "loom-dsp"
+version = "0.1.0"
+
+[[package]]
+name = "loom-pipewire"
+version = "0.1.0"
+dependencies = [
+ "loom-dsp",
  "pipewire",
 ]
 

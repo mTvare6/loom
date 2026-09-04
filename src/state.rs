@@ -36,3 +36,17 @@ impl AudioState {
         self.bypass.store(state, Ordering::Relaxed);
     }
 }
+
+impl loom_pipewire::AudioControls for AudioState {
+    fn volume(&self) -> f32 {
+        AudioState::volume(self)
+    }
+
+    fn spatial_mix(&self) -> f32 {
+        AudioState::spatial_mix(self)
+    }
+
+    fn is_bypassed(&self) -> bool {
+        AudioState::is_bypassed(self)
+    }
+}

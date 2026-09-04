@@ -1,5 +1,4 @@
-use crate::dsp::LoomEngine;
-use crate::state::AudioState;
+use loom_dsp::LoomEngine;
 use pipewire as pw;
 use pw::{
     filter::{Filter, FilterBox, FilterFlags, FilterPort, FilterPortFlags},
@@ -8,14 +7,20 @@ use pw::{
 };
 use std::sync::Arc;
 
+pub trait AudioControls: Send + Sync + 'static {
+    fn volume(&self) -> f32;
+    fn spatial_mix(&self) -> f32;
+    fn is_bypassed(&self) -> bool;
+}
+
 struct Processor<'f> {
     ports: [FilterPort<'f>; 4],
     engine: Box<LoomEngine>,
-    state: Arc<AudioState>,
+    state: Arc<dyn AudioControls>,
     spatial: f32,
 }
 
-pub fn run_audio_engine(state: Arc<AudioState>) -> Result<(), pw::Error> {
+pub fn run_audio_engine(state: Arc<dyn AudioControls>) -> Result<(), pw::Error> {
     pw::init();
     let mainloop = pw::main_loop::MainLoopRc::new(None)?;
     let context = pw::context::ContextRc::new(&mainloop, None)?;

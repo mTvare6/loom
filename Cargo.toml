@@ -3,7 +3,11 @@ name = "loom"
 version = "0.1.0"
 edition = "2024"
 
+[workspace]
+members = ["crates/loom-dsp", "crates/loom-pipewire"]
+resolver = "3"
+
 [dependencies]
 eframe = "0.33.3"
 egui = "0.33.3"
-pipewire = { path = "../pipewire-rs/pipewire" }
+loom-pipewire = { path = "crates/loom-pipewire" }
