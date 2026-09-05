@@ -2,3 +2,6 @@
 name = "saq-dsp"
 version = "0.1.0"
 edition = "2024"
+
+[dependencies]
+rustfft = "6.4.1"

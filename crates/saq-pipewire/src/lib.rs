@@ -1,4 +1,4 @@
-use saq_dsp::ŚaqEngine;
+use saq_dsp::{Mode, SpatialEngine, SurroundEngine};
 use pipewire as pw;
 use pw::{
     filter::{Filter, FilterBox, FilterFlags, FilterPort, FilterPortFlags},
@@ -9,15 +9,14 @@ use std::sync::Arc;
 
 pub trait AudioControls: Send + Sync + 'static {
     fn volume(&self) -> f32;
-    fn spatial_mix(&self) -> f32;
-    fn is_bypassed(&self) -> bool;
+    fn mode(&self) -> Mode;
 }
 
 struct Processor<'f> {
     ports: [FilterPort<'f>; 4],
-    engine: Box<ŚaqEngine>,
+    spatial: Box<SpatialEngine>,
+    surround: Box<SurroundEngine>,
     state: Arc<dyn AudioControls>,
-    spatial: f32,
 }
 
 pub fn run_audio_engine(state: Arc<dyn AudioControls>) -> Result<(), pw::Error> {
@@ -39,6 +38,9 @@ pub fn run_audio_engine(state: Arc<dyn AudioControls>) -> Result<(), pw::Error> 
         },
     )?;
 
+    let mut spatial = SpatialEngine::new(48000.0);
+    spatial.update_params(1.0);
+
     let processor = Processor {
         ports: [
             add_port(&filter, Direction::Input, "input_FL", "FL")?,
@@ -46,9 +48,9 @@ pub fn run_audio_engine(state: Arc<dyn AudioControls>) -> Result<(), pw::Error> 
             add_port(&filter, Direction::Output, "output_FL", "FL")?,
             add_port(&filter, Direction::Output, "output_FR", "FR")?,
         ],
-        engine: ŚaqEngine::new(48000.0),
+        spatial,
+        surround: SurroundEngine::new(),
         state,
-        spatial: -999.0,
     };
 
     let _listener = filter
@@ -73,19 +75,13 @@ pub fn run_audio_engine(state: Arc<dyn AudioControls>) -> Result<(), pw::Error> 
             };
 
             let volume = processor.state.volume();
-            let spatial = processor.state.spatial_mix();
-            let bypassed = processor.state.is_bypassed();
-
-            if !bypassed && (spatial - processor.spatial).abs() > 0.01 {
-                processor.engine.update_params(spatial);
-                processor.spatial = spatial;
-            }
+            let mode = processor.state.mode();
 
             for i in 0..n_samples as usize {
-                let (left, right) = if bypassed {
-                    (input_left[i], input_right[i])
-                } else {
-                    processor.engine.process(input_left[i], input_right[i])
+                let (left, right) = match mode {
+                    Mode::Off => (input_left[i], input_right[i]),
+                    Mode::Spatial => processor.spatial.process(input_left[i], input_right[i]),
+                    Mode::SurroundSound => processor.surround.process(input_left[i], input_right[i]),
                 };
                 output_left[i] = left * volume;
                 output_right[i] = right * volume;

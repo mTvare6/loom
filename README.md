@@ -1,6 +1,6 @@
 # Śaq
 
-A realtime stereo spatialised spatial audio processor (using crossfeed, decorrelation, early reflections and reverb) built with pipewire-rs and egui.
+A realtime stereo spatialised spatial audio processor built with pipewire-rs and egui.
 
 ### Libraries
 
@@ -20,5 +20,5 @@ Route audio into the `saq_virtual_sink` inputs using [qpwgraph](https://github.c
 ### Roadmap
 
 - [ ] Persistence
-- [ ] Explore more techniques and sound as addictive as commercial software
+- [ ] Explore additional spatial-audio techniques
 - [ ] Non-RT features

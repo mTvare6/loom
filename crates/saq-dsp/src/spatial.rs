@@ -3,7 +3,7 @@ use crate::{
     early_reflections::EarlyReflections, itd::MicroITD, reverb::StereoRoom,
 };
 
-pub struct ŚaqEngine {
+pub struct SpatialEngine {
     cross1_l: LR4,
     cross1_r: LR4,
     cross2_l: LR4,
@@ -26,7 +26,7 @@ pub struct ŚaqEngine {
     intensity: f32,
 }
 
-impl ŚaqEngine {
+impl SpatialEngine {
     pub fn new(sr: f32) -> Box<Self> {
         // Taps are delay ms then gain then air absorption LPF Hz
         let t_l = [
@@ -84,6 +84,7 @@ impl ŚaqEngine {
     }
 
     // Saturates nicely instead of harsh hollow feeling
+    // https://en.wikipedia.org/wiki/Waveshaper
     // https://www.elementary.audio/docs/tutorials/distortion-saturation-wave-shaping
     #[inline(always)]
     fn limit_side(x: f32) -> f32 {
@@ -138,6 +139,7 @@ impl ŚaqEngine {
         // More 2nd and 3rd order harmonics
         // Makes the frequencies more audible and distinct
         // https://en.wikipedia.org/wiki/Missing_fundamental
+        // https://en.wikipedia.org/wiki/Distortion#Audio_distortion
         // https://www.soundonsound.com/techniques/all-about-exciters-enhancers
         // https://www.elementary.audio/docs/tutorials/distortion-saturation-wave-shaping
         let width_gain = (1.0 + self.intensity * 1.5) * dynamic_width_mod;
