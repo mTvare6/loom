@@ -1,17 +1,16 @@
-use std::sync::atomic::{AtomicBool, AtomicU32, Ordering};
+use loom_dsp::Mode;
+use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 pub struct AudioState {
     volume: AtomicU32,
-    spatial_mix: AtomicU32,
-    bypass: AtomicBool,
+    mode: AtomicU8,
 }
 
 impl AudioState {
     pub fn new(initial_volume: f32) -> Self {
         Self {
             volume: AtomicU32::new(initial_volume.to_bits()),
-            spatial_mix: AtomicU32::new(0.0_f32.to_bits()),
-            bypass: AtomicBool::new(false),
+            mode: AtomicU8::new(Mode::Off as u8),
         }
     }
 
@@ -22,18 +21,11 @@ impl AudioState {
         self.volume.store(vol.to_bits(), Ordering::Relaxed);
     }
 
-    pub fn spatial_mix(&self) -> f32 {
-        f32::from_bits(self.spatial_mix.load(Ordering::Relaxed))
+    pub fn mode(&self) -> Mode {
+        Mode::from_u8(self.mode.load(Ordering::Relaxed))
     }
-    pub fn set_spatial_mix(&self, mix: f32) {
-        self.spatial_mix.store(mix.to_bits(), Ordering::Relaxed);
-    }
-
-    pub fn is_bypassed(&self) -> bool {
-        self.bypass.load(Ordering::Relaxed)
-    }
-    pub fn set_bypass(&self, state: bool) {
-        self.bypass.store(state, Ordering::Relaxed);
+    pub fn set_mode(&self, mode: Mode) {
+        self.mode.store(mode as u8, Ordering::Relaxed);
     }
 }
 
@@ -42,11 +34,7 @@ impl loom_pipewire::AudioControls for AudioState {
         AudioState::volume(self)
     }
 
-    fn spatial_mix(&self) -> f32 {
-        AudioState::spatial_mix(self)
-    }
-
-    fn is_bypassed(&self) -> bool {
-        AudioState::is_bypassed(self)
+    fn mode(&self) -> Mode {
+        AudioState::mode(self)
     }
 }

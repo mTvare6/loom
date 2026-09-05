@@ -1,6 +1,6 @@
 # loom
 
-A realtime stereo spatialised spatial audio processor (using crossfeed, decorrelation, early reflections and reverb) built with pipewire-rs and egui.
+A realtime stereo spatialised spatial audio processor built with pipewire-rs and egui.
 
 ### Libraries
 
@@ -20,5 +20,5 @@ Route audio into the `loom_virtual_sink` inputs using [qpwgraph](https://github.
 ### Roadmap
 
 - [ ] Persistence
-- [ ] Explore more techniques and sound as addictive as [Boom3d](https://www.globaldelight.com/boom/)
+- [ ] Explore additional spatial-audio techniques
 - [ ] Non-RT features
