@@ -1726,6 +1726,7 @@ dependencies = [
 [[package]]
 name = "libspa"
 version = "0.10.1"
+source = "git+https://github.com/mTvare6/pipewire-rs.git?branch=pw-filter#f741fc9bece5a9115a73a860f09bada62bd735c9"
 dependencies = [
  "bitflags 2.11.0",
  "cc",
@@ -1740,6 +1741,7 @@ dependencies = [
 [[package]]
 name = "libspa-sys"
 version = "0.10.1"
+source = "git+https://github.com/mTvare6/pipewire-rs.git?branch=pw-filter#f741fc9bece5a9115a73a860f09bada62bd735c9"
 dependencies = [
  "bindgen",
  "cc",
@@ -2395,6 +2397,7 @@ dependencies = [
 [[package]]
 name = "pipewire"
 version = "0.10.1"
+source = "git+https://github.com/mTvare6/pipewire-rs.git?branch=pw-filter#f741fc9bece5a9115a73a860f09bada62bd735c9"
 dependencies = [
  "bitflags 2.11.0",
  "libc",
@@ -2407,6 +2410,7 @@ dependencies = [
 [[package]]
 name = "pipewire-sys"
 version = "0.10.1"
+source = "git+https://github.com/mTvare6/pipewire-rs.git?branch=pw-filter#f741fc9bece5a9115a73a860f09bada62bd735c9"
 dependencies = [
  "bindgen",
  "libspa-sys",

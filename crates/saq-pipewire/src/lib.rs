@@ -1,15 +1,32 @@
 use saq_dsp::{Mode, SpatialEngine, SurroundEngine};
 use pipewire as pw;
 use pw::{
+    channel,
     filter::{Filter, FilterBox, FilterFlags, FilterPort, FilterPortFlags},
     properties::properties,
     spa::utils::Direction,
 };
-use std::sync::Arc;
+use std::{rc::Rc, sync::Arc};
+
+mod routing;
 
 pub trait AudioControls: Send + Sync + 'static {
     fn volume(&self) -> f32;
     fn mode(&self) -> Mode;
+}
+
+pub struct ShutdownTransmitter(channel::Sender<()>);
+pub struct ShutdownReceiver(channel::Receiver<()>);
+
+pub fn shutdown_channel() -> (ShutdownTransmitter, ShutdownReceiver) {
+    let (tx, rx) = channel::channel();
+    (ShutdownTransmitter(tx), ShutdownReceiver(rx))
+}
+
+impl ShutdownTransmitter {
+    pub fn shutdown(&self) {
+        let _ = self.0.send(());
+    }
 }
 
 struct Processor<'f> {
@@ -19,7 +36,10 @@ struct Processor<'f> {
     state: Arc<dyn AudioControls>,
 }
 
-pub fn run_audio_engine(state: Arc<dyn AudioControls>) -> Result<(), pw::Error> {
+pub fn run_audio_engine(
+    state: Arc<dyn AudioControls>,
+    shutdown_rx: ShutdownReceiver,
+) -> Result<(), pw::Error> {
     pw::init();
     let mainloop = pw::main_loop::MainLoopRc::new(None)?;
     let context = pw::context::ContextRc::new(&mainloop, None)?;
@@ -35,6 +55,7 @@ pub fn run_audio_engine(state: Arc<dyn AudioControls>) -> Result<(), pw::Error> 
             *pw::keys::MEDIA_CLASS => "Audio/Sink",
             *pw::keys::NODE_NAME => "saq_virtual_sink",
             *pw::keys::NODE_DESCRIPTION => "Śaq",
+            *pw::keys::NODE_VIRTUAL => "true",
         },
     )?;
 
@@ -90,6 +111,18 @@ pub fn run_audio_engine(state: Arc<dyn AudioControls>) -> Result<(), pw::Error> 
         .register()?;
 
     filter.connect(FilterFlags::RT_PROCESS, &mut [])?;
+
+    let routing = Rc::new(routing::Routing::new(&core)?);
+    let mainloop_weak = mainloop.downgrade();
+    let routing_weak = Rc::downgrade(&routing);
+    let _shutdown = shutdown_rx.0.attach(mainloop.loop_(), move |_| {
+        if let Some(routing) = routing_weak.upgrade() {
+            routing.restore_default_sink();
+        }
+        if let Some(mainloop) = mainloop_weak.upgrade() {
+            mainloop.quit();
+        }
+    });
 
     mainloop.run();
     Ok(())
