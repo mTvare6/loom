@@ -2,7 +2,7 @@ use saq_dsp::{Mode, SpatialEngine, SurroundEngine};
 use pipewire as pw;
 use pw::{
     channel,
-    filter::{Filter, FilterBox, FilterFlags, FilterPort, FilterPortFlags},
+    filter::{Filter, FilterFlags, FilterPortFlags, FilterRc, PortHandle},
     properties::properties,
     spa::utils::Direction,
 };
@@ -29,8 +29,9 @@ impl ShutdownTransmitter {
     }
 }
 
-struct Processor<'f> {
-    ports: [FilterPort<'f>; 4],
+struct Processor {
+    filter: FilterRc,
+    ports: [PortHandle; 4],
     spatial: Box<SpatialEngine>,
     surround: Box<SurroundEngine>,
     state: Arc<dyn AudioControls>,
@@ -45,8 +46,8 @@ pub fn run_audio_engine(
     let context = pw::context::ContextRc::new(&mainloop, None)?;
     let core = context.connect_rc(None)?;
 
-    let filter = FilterBox::new(
-        &core,
+    let filter = FilterRc::new(
+        core.clone(),
         "saq",
         properties! {
             *pw::keys::MEDIA_TYPE => "Audio",
@@ -62,7 +63,8 @@ pub fn run_audio_engine(
     let mut spatial = SpatialEngine::new(48000.0);
     spatial.update_params(1.0);
 
-    let processor = Processor {
+    let mut processor = Processor {
+        filter: filter.clone(),
         ports: [
             add_port(&filter, Direction::Input, "input_FL", "FL")?,
             add_port(&filter, Direction::Input, "input_FR", "FR")?,
@@ -75,18 +77,18 @@ pub fn run_audio_engine(
     };
 
     let _listener = filter
-        .add_local_listener_with_user_data(processor)
-        .process(|_, processor, position| {
+        .add_local_listener()
+        .process(move |position| {
             let Ok(n_samples) = position.clock.duration.try_into() else {
                 return;
             };
             let [input_left, input_right, output_left, output_right] = &mut processor.ports;
             let buffers = unsafe {
                 (
-                    input_left.dsp_buffer::<f32>(n_samples),
-                    input_right.dsp_buffer::<f32>(n_samples),
-                    output_left.dsp_buffer::<f32>(n_samples),
-                    output_right.dsp_buffer::<f32>(n_samples),
+                    processor.filter.dsp_buffer::<f32>(input_left, n_samples),
+                    processor.filter.dsp_buffer::<f32>(input_right, n_samples),
+                    processor.filter.dsp_buffer::<f32>(output_left, n_samples),
+                    processor.filter.dsp_buffer::<f32>(output_right, n_samples),
                 )
             };
             let (Some(input_left), Some(input_right), Some(output_left), Some(output_right)) =
@@ -128,12 +130,12 @@ pub fn run_audio_engine(
     Ok(())
 }
 
-fn add_port<'f>(
-    filter: &'f Filter,
+fn add_port(
+    filter: &Filter,
     direction: Direction,
     name: &str,
     channel: &str,
-) -> Result<FilterPort<'f>, pw::Error> {
+) -> Result<PortHandle, pw::Error> {
     filter.add_port(
         direction,
         FilterPortFlags::MAP_BUFFERS,

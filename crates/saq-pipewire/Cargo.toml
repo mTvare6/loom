@@ -5,4 +5,4 @@ edition = "2024"
 
 [dependencies]
 saq-dsp = { path = "../saq-dsp" }
-pipewire = { git = "https://github.com/mTvare6/pipewire-rs.git", branch = "pw-filter" }
+pipewire = { git = "https://gitlab.freedesktop.org/epestr/pipewire-rs", branch = "pw-filter" }
