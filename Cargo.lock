@@ -1794,6 +1794,7 @@ dependencies = [
  "eframe",
  "egui",
  "loom-dsp",
+ "loom-ipc",
  "loom-pipewire",
 ]
 
@@ -1802,6 +1803,14 @@ name = "loom-dsp"
 version = "0.1.0"
 dependencies = [
  "rustfft",
+]
+
+[[package]]
+name = "loom-ipc"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
 ]
 
 [[package]]

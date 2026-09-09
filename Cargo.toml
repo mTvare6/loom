@@ -4,7 +4,7 @@ version = "0.1.0"
 edition = "2024"
 
 [workspace]
-members = ["crates/loom-dsp", "crates/loom-pipewire"]
+members = ["crates/loom-dsp", "crates/loom-ipc", "crates/loom-pipewire"]
 resolver = "3"
 
 [dependencies]
@@ -12,3 +12,4 @@ eframe = "0.33.3"
 egui = "0.33.3"
 loom-dsp = { path = "crates/loom-dsp" }
 loom-pipewire = { path = "crates/loom-pipewire" }
+loom-ipc = { path = "crates/loom-ipc" }

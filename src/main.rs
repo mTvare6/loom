@@ -1,8 +1,9 @@
 mod gui;
 mod state;
 
+use loom_ipc::IpcServer;
 use state::AudioState;
-use std::{sync::Arc, thread::JoinHandle};
+use std::{env::args, sync::Arc, thread::JoinHandle};
 
 struct AudioThread {
     shutdown_tx: loom_pipewire::ShutdownTransmitter,
@@ -40,5 +41,16 @@ fn main() -> eframe::Result<()> {
     let shared_state = Arc::new(AudioState::new(1.0));
     let _audio_thread = AudioThread::start(shared_state.clone());
 
-    gui::run_gui(shared_state)
+    let args: Vec<String> = args().collect();
+
+    if args.contains(&"--headless".to_string()) {
+        let ipc_server = IpcServer::new("/tmp/loom_audio.sock");
+        let state = shared_state.clone();
+        ipc_server.run(Arc::new(move |request| state.handle_query(request)));
+        Ok(())
+    } else if args.contains(&"--gui".to_string()) {
+        gui::run_gui(shared_state)
+    } else {
+        panic!("Use '--headless' or '--gui'")
+    }
 }

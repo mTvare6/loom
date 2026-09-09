@@ -1,4 +1,5 @@
 use loom_dsp::Mode;
+use loom_ipc::{Request, Response};
 use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
 
 pub struct AudioState {
@@ -26,6 +27,23 @@ impl AudioState {
     }
     pub fn set_mode(&self, mode: Mode) {
         self.mode.store(mode as u8, Ordering::Relaxed);
+    }
+
+    pub fn handle_query(&self, request: Request) -> Response {
+        match request {
+            Request::SetVolume(v) => {
+                self.set_volume(v);
+                Response::Ok
+            }
+            Request::SetMode(m) => {
+                self.set_mode(Mode::from_u8(m));
+                Response::Ok
+            }
+            Request::GetState => Response::State {
+                volume: self.volume(),
+                mode: self.mode() as u8,
+            },
+        }
     }
 }
 
