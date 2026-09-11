@@ -1,4 +1,7 @@
-use loom_dsp::{Mode, SpatialEngine, SurroundEngine};
+use loom_dsp::{
+    AmbienceEngine, FidelityEngine, Mode, NightEngine, PitchEngine, SpatialFilterEngine,
+    SpatialStereoEngine, SpatialSurroundEngine, SurroundEngine,
+};
 use pipewire as pw;
 use pw::{
     channel,
@@ -13,6 +16,8 @@ mod routing;
 pub trait AudioControls: Send + Sync + 'static {
     fn volume(&self) -> f32;
     fn mode(&self) -> Mode;
+    fn pitch_enabled(&self) -> bool;
+    fn pitch_semitones(&self) -> f32;
 }
 
 pub struct ShutdownTransmitter(channel::Sender<()>);
@@ -32,8 +37,15 @@ impl ShutdownTransmitter {
 struct Processor {
     filter: FilterRc,
     ports: [PortHandle; 4],
-    spatial: Box<SpatialEngine>,
+    spatial_filter: Box<SpatialFilterEngine>,
+    spatial_stereo: Box<SpatialStereoEngine>,
+    spatial_surround: Box<SpatialSurroundEngine>,
     surround: Box<SurroundEngine>,
+    ambience: Box<AmbienceEngine>,
+    fidelity: Box<FidelityEngine>,
+    night: Box<NightEngine>,
+    pitch: Box<PitchEngine>,
+    pitch_was_enabled: bool,
     state: Arc<dyn AudioControls>,
 }
 
@@ -60,8 +72,10 @@ pub fn run_audio_engine(
         },
     )?;
 
-    let mut spatial = SpatialEngine::new(48000.0);
-    spatial.update_params(1.0);
+    // TODO: Generalize to 96k or 44.1k if input advertises that.
+    let mut spatial_filter = SpatialFilterEngine::new(48000.0);
+    // TODO: Add controls and parametrise every filter.
+    spatial_filter.update_params(1.0);
 
     let mut processor = Processor {
         filter: filter.clone(),
@@ -71,8 +85,15 @@ pub fn run_audio_engine(
             add_port(&filter, Direction::Output, "output_FL", "FL")?,
             add_port(&filter, Direction::Output, "output_FR", "FR")?,
         ],
-        spatial,
+        spatial_filter,
+        spatial_stereo: SpatialStereoEngine::new(),
+        spatial_surround: SpatialSurroundEngine::new(),
         surround: SurroundEngine::new(),
+        ambience: AmbienceEngine::new(),
+        fidelity: FidelityEngine::new(),
+        night: NightEngine::new(),
+        pitch: PitchEngine::new(),
+        pitch_was_enabled: false,
         state,
     };
 
@@ -103,12 +124,36 @@ pub fn run_audio_engine(
             for i in 0..n_samples as usize {
                 let (left, right) = match mode {
                     Mode::Off => (input_left[i], input_right[i]),
-                    Mode::Spatial => processor.spatial.process(input_left[i], input_right[i]),
+                    Mode::SpatialFilter => processor
+                        .spatial_filter
+                        .process(input_left[i], input_right[i]),
+                    Mode::SpatialStereo => processor
+                        .spatial_stereo
+                        .process(input_left[i], input_right[i]),
+                    Mode::SpatialSurround => processor
+                        .spatial_surround
+                        .process(input_left[i], input_right[i]),
                     Mode::Surround3d => processor.surround.process(input_left[i], input_right[i]),
+                    Mode::Ambience => processor.ambience.process(input_left[i], input_right[i]),
+                    Mode::Fidelity => processor.fidelity.process(input_left[i], input_right[i]),
+                    Mode::Night => processor.night.process(input_left[i], input_right[i]),
                 };
                 output_left[i] = left * volume;
                 output_right[i] = right * volume;
             }
+
+            let pitch_enabled = processor.state.pitch_enabled();
+            if pitch_enabled {
+                if !processor.pitch_was_enabled {
+                    processor.pitch.reset();
+                }
+                processor.pitch.process(
+                    output_left,
+                    output_right,
+                    processor.state.pitch_semitones(),
+                );
+            }
+            processor.pitch_was_enabled = pitch_enabled;
         })
         .register()?;
 

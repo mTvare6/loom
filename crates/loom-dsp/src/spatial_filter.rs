@@ -3,7 +3,7 @@ use crate::{
     early_reflections::EarlyReflections, itd::MicroITD, room::StereoRoom,
 };
 
-pub struct SpatialEngine {
+pub struct SpatialFilterEngine {
     cross1_l: LR4,
     cross1_r: LR4,
     cross2_l: LR4,
@@ -26,7 +26,7 @@ pub struct SpatialEngine {
     intensity: f32,
 }
 
-impl SpatialEngine {
+impl SpatialFilterEngine {
     pub fn new(sr: f32) -> Box<Self> {
         // Taps are delay ms then gain then air absorption LPF Hz
         let t_l = [
