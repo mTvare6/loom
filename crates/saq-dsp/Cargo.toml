@@ -5,3 +5,4 @@ edition = "2024"
 
 [dependencies]
 rustfft = "6.4.1"
+signalsmith-stretch = "0.1.3"

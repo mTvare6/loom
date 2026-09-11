@@ -1,9 +1,15 @@
 use saq_dsp::Mode;
-use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
+
+// FIXME: State graph should allow more complicate transition
+// structure. Clarity should be valid across different modes
+// and a two-state solution is neccesary.
 pub struct AudioState {
     volume: AtomicU32,
     mode: AtomicU8,
+    pitch_enabled: AtomicBool,
+    pitch_semitones: AtomicU32,
 }
 
 impl AudioState {
@@ -11,6 +17,8 @@ impl AudioState {
         Self {
             volume: AtomicU32::new(initial_volume.to_bits()),
             mode: AtomicU8::new(Mode::Off as u8),
+            pitch_enabled: AtomicBool::new(false),
+            pitch_semitones: AtomicU32::new(0.0_f32.to_bits()),
         }
     }
 
@@ -27,6 +35,23 @@ impl AudioState {
     pub fn set_mode(&self, mode: Mode) {
         self.mode.store(mode as u8, Ordering::Relaxed);
     }
+
+    pub fn pitch_enabled(&self) -> bool {
+        self.pitch_enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn set_pitch_enabled(&self, enabled: bool) {
+        self.pitch_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn pitch_semitones(&self) -> f32 {
+        f32::from_bits(self.pitch_semitones.load(Ordering::Relaxed))
+    }
+
+    pub fn set_pitch_semitones(&self, semitones: f32) {
+        self.pitch_semitones
+            .store(semitones.clamp(-12.0, 12.0).to_bits(), Ordering::Relaxed);
+    }
 }
 
 impl saq_pipewire::AudioControls for AudioState {
@@ -36,5 +61,13 @@ impl saq_pipewire::AudioControls for AudioState {
 
     fn mode(&self) -> Mode {
         AudioState::mode(self)
+    }
+
+    fn pitch_enabled(&self) -> bool {
+        AudioState::pitch_enabled(self)
+    }
+
+    fn pitch_semitones(&self) -> f32 {
+        AudioState::pitch_semitones(self)
     }
 }
