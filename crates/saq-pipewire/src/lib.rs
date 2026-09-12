@@ -162,6 +162,7 @@ pub fn run_audio_engine(
                 return;
             };
             let (Some(input_left), Some(input_right)) = (input_left, input_right) else {
+                // No input left anymore
                 let input_just_disconnected = !processor.input_already_disconnected;
                 if input_just_disconnected {
                     processor.input_already_disconnected = true;
@@ -169,7 +170,7 @@ pub fn run_audio_engine(
                 }
                 if processor.output_buffer_resets_left > 0 {
                     // At 8,192 bytes per callback and 48k per second
-                    // 384kB if spent zeroing. They are coallesed to save bandwidth
+                    // 384kBps if spent zeroing. They are coallesed to save bandwidth
                     output_left.fill(0.0);
                     output_right.fill(0.0);
                     processor.output_buffer_resets_left -= 1;
