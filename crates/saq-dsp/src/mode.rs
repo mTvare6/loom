@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Mode {

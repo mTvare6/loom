@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use saq_dsp::{
     RoomEngine, ClarityEngine, Mode, NightEngine, PitchEngine, SpatialFilterEngine,
     SpatialStereoEngine, SpatialSurroundEngine, SurroundEngine,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use rustfft::{Fft, FftPlanner, num_complex::Complex32};
 use std::sync::Arc;
 

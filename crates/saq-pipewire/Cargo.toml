@@ -1,7 +1,10 @@
+# SPDX-License-Identifier: MPL-2.0
+
 [package]
 name = "saq-pipewire"
 version = "0.1.0"
 edition = "2024"
+license = "MPL-2.0"
 
 [dependencies]
 saq-dsp = { path = "../saq-dsp" }

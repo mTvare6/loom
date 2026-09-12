@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use std::f32::consts::{PI, SQRT_2};
 
 // https://webaudio.github.io/Audio-EQ-Cookbook/audio-eq-cookbook.html

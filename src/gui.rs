@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::state::AudioState;
 use eframe::egui;
 use saq_dsp::Mode;

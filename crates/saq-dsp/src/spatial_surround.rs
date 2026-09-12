@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::convolution::{StereoFir, read_float_wave};
 
 const DIRECT_LEFT: &[u8] = include_bytes!("../assets/spatial-surround/direct-left.wav");

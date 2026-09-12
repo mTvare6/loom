@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::delay::DelayLine;
 use std::f32::consts::PI;
 

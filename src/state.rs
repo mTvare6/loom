@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use saq_dsp::Mode;
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
