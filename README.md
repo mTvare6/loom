@@ -19,3 +19,7 @@ cargo run --release
 - [ ] Explore additional spatial-audio techniques
 - [ ] Non-RT features
 - [ ] deamon-mode and IPC support
+
+### License
+
+The source code and documentation are licensed under the Mozilla Public License 2.0. See [LICENSE](LICENSE).

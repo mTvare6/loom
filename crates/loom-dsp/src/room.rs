@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::delay::DelayLine;
 
 // https://ccrma.stanford.edu/~jos/pasp/Schroeder_Reverberators.html

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 // N should be 2 power for the mask N - 1 to work
 pub(crate) struct DelayLine<const N: usize> {
     pub(crate) buffer: [f32; N],

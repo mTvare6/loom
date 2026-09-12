@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use loom_dsp::{
     AmbienceEngine, FidelityEngine, Mode, NightEngine, PitchEngine, SpatialFilterEngine,
     SpatialStereoEngine, SpatialSurroundEngine, SurroundEngine,

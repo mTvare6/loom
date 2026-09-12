@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::Biquad;
 
 // https://en.wikipedia.org/wiki/Linkwitz%E2%80%93Riley_filter

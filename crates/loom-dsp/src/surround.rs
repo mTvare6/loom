@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::convolution::{StereoFir, read_float_wave};
 
 // The extracted files are quieter because they were recorded at 46% volume

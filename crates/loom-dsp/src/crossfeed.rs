@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::{Biquad, delay::DelayLine};
 
 // Head blocks high freq from going to opp side

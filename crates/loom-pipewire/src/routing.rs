@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use pipewire as pw;
 use pw::{
     core::CoreRc,

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::{
     Biquad, crossfeed::Crossfeed, crossover::LR4, decorrelator::ModAllPass,
     early_reflections::EarlyReflections, itd::MicroITD, room::StereoRoom,
