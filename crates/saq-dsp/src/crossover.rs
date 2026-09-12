@@ -31,4 +31,11 @@ impl LR4 {
             self.hp2.process(self.hp1.process(x)),
         )
     }
+
+    pub(crate) fn reset(&mut self) {
+        self.lp1.reset();
+        self.lp2.reset();
+        self.hp1.reset();
+        self.hp2.reset();
+    }
 }

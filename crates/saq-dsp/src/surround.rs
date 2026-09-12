@@ -30,6 +30,10 @@ impl SurroundEngine {
         let (left, right) = self.fir.process(left, right);
         (left * LOUDNESS_GAIN, right * LOUDNESS_GAIN)
     }
+
+    pub fn reset(&mut self) {
+        self.fir.reset();
+    }
 }
 
 #[cfg(test)]

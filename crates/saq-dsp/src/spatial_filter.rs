@@ -83,6 +83,23 @@ impl SpatialFilterEngine {
         self.intensity = intensity;
     }
 
+    pub fn reset(&mut self) {
+        self.cross1_l.reset();
+        self.cross1_r.reset();
+        self.cross2_l.reset();
+        self.cross2_r.reset();
+        self.pinna_notch.reset();
+        self.center_itd.reset();
+        self.xf_l.reset();
+        self.xf_r.reset();
+        self.decorr_l.reset();
+        self.decorr_r.reset();
+        self.er_l.reset();
+        self.er_r.reset();
+        self.room.reset();
+        self.transient_env = 0.0;
+    }
+
     // Saturates nicely instead of harsh hollow feeling
     // https://en.wikipedia.org/wiki/Waveshaper
     // https://www.elementary.audio/docs/tutorials/distortion-saturation-wave-shaping
