@@ -19,4 +19,8 @@ impl MicroITD {
     pub(crate) fn process(&mut self, x: f32) -> f32 {
         self.delay.process_frac(x, self.delay_samples)
     }
+
+    pub(crate) fn reset(&mut self) {
+        self.delay.reset();
+    }
 }

@@ -23,4 +23,9 @@ impl Crossfeed {
     pub(crate) fn process(&mut self, x: f32) -> f32 {
         self.shelf.process(self.delay.process(x, self.samples))
     }
+
+    pub(crate) fn reset(&mut self) {
+        self.delay.reset();
+        self.shelf.reset();
+    }
 }

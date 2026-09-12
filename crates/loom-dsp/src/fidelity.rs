@@ -26,6 +26,10 @@ impl FidelityEngine {
     pub fn process(&mut self, left: f32, right: f32) -> (f32, f32) {
         self.fir.process(left, right)
     }
+
+    pub fn reset(&mut self) {
+        self.fir.reset();
+    }
 }
 
 #[cfg(test)]

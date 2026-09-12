@@ -12,6 +12,11 @@ impl<const N: usize> DelayLine<N> {
         }
     }
 
+    pub(crate) fn reset(&mut self) {
+        self.buffer.fill(0.0);
+        self.write_idx = 0;
+    }
+
     #[inline(always)]
     pub(crate) fn process(&mut self, x: f32, delay_samples: usize) -> f32 {
         self.buffer[self.write_idx] = x;

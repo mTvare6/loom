@@ -82,6 +82,22 @@ impl StereoFir {
         output
     }
 
+    pub(crate) fn reset(&mut self) {
+        for channel in self.input_history.iter_mut() {
+            for partition in channel {
+                partition.fill(Complex::default());
+            }
+        }
+        self.input_block.fill([0.0; BLOCK_SIZE]);
+        self.output_block.fill([0.0; BLOCK_SIZE]);
+        for spectrum in &mut self.output_spectra {
+            spectrum.fill(Complex::default());
+        }
+        self.overlap.fill([0.0; BLOCK_SIZE]);
+        self.block_position = 0;
+        self.history_position = 0;
+    }
+
     fn process_block(&mut self) {
         for input in 0..2 {
             let spectrum = &mut self.input_history[input][self.history_position];

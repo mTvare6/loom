@@ -13,6 +13,11 @@ use std::{rc::Rc, sync::Arc};
 
 mod routing;
 
+// FIXME: Track add_buffer events and use that limit instead
+// of relying on un-exporting MAX_BUFFER limit from source
+// https://gitlab.freedesktop.org/pipewire/pipewire/-/raw/1.6.8/src/pipewire/filter.c#L29
+const MAX_PIPEWIRE_PORT_BUFFERS: u8 = 64;
+
 pub trait AudioControls: Send + Sync + 'static {
     fn volume(&self) -> f32;
     fn mode(&self) -> Mode;
@@ -46,7 +51,41 @@ struct Processor {
     night: Box<NightEngine>,
     pitch: Box<PitchEngine>,
     pitch_was_enabled: bool,
+    input_already_disconnected: bool,
+    output_buffer_resets_left: u8,
+    active_mode: Mode,
     state: Arc<dyn AudioControls>,
+}
+
+impl Processor {
+    fn reset_all(&mut self) {
+        self.spatial_filter.reset();
+        self.spatial_stereo.reset();
+        self.spatial_surround.reset();
+        self.surround.reset();
+        self.ambience.reset();
+        self.fidelity.reset();
+        self.night.reset();
+        self.pitch.reset();
+    }
+
+    fn switch_mode(&mut self, mode: Mode) {
+        if mode == self.active_mode {
+            return;
+        }
+
+        match self.active_mode {
+            Mode::Off => {}
+            Mode::SpatialFilter => self.spatial_filter.reset(),
+            Mode::SpatialStereo => self.spatial_stereo.reset(),
+            Mode::SpatialSurround => self.spatial_surround.reset(),
+            Mode::Surround3d => self.surround.reset(),
+            Mode::Ambience => self.ambience.reset(),
+            Mode::Fidelity => self.fidelity.reset(),
+            Mode::Night => self.night.reset(),
+        }
+        self.active_mode = mode;
+    }
 }
 
 pub fn run_audio_engine(
@@ -94,6 +133,9 @@ pub fn run_audio_engine(
         night: NightEngine::new(),
         pitch: PitchEngine::new(),
         pitch_was_enabled: false,
+        input_already_disconnected: true,
+        output_buffer_resets_left: 0,
+        active_mode: Mode::Off,
         state,
     };
 
@@ -103,6 +145,10 @@ pub fn run_audio_engine(
             let Ok(n_samples) = position.clock.duration.try_into() else {
                 return;
             };
+            let volume = processor.state.volume();
+            let mode = processor.state.mode();
+            processor.switch_mode(mode);
+
             let [input_left, input_right, output_left, output_right] = &mut processor.ports;
             let buffers = unsafe {
                 (
@@ -112,14 +158,29 @@ pub fn run_audio_engine(
                     processor.filter.dsp_buffer::<f32>(output_right, n_samples),
                 )
             };
-            let (Some(input_left), Some(input_right), Some(output_left), Some(output_right)) =
-                buffers
-            else {
+            let (input_left, input_right, Some(output_left), Some(output_right)) = buffers else {
                 return;
             };
-
-            let volume = processor.state.volume();
-            let mode = processor.state.mode();
+            let (Some(input_left), Some(input_right)) = (input_left, input_right) else {
+                let input_just_disconnected = !processor.input_already_disconnected;
+                if input_just_disconnected {
+                    processor.input_already_disconnected = true;
+                    processor.output_buffer_resets_left = MAX_PIPEWIRE_PORT_BUFFERS;
+                }
+                if processor.output_buffer_resets_left > 0 {
+                    // At 8,192 bytes per callback and 48k per second
+                    // 384kB if spent zeroing. They are coallesed to save bandwidth
+                    output_left.fill(0.0);
+                    output_right.fill(0.0);
+                    processor.output_buffer_resets_left -= 1;
+                }
+                if input_just_disconnected {
+                    processor.reset_all();
+                }
+                return;
+            };
+            processor.input_already_disconnected = false;
+            processor.output_buffer_resets_left = 0;
 
             for i in 0..n_samples as usize {
                 let (left, right) = match mode {

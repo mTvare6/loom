@@ -39,4 +39,9 @@ impl ModAllPass {
         self.delay.buffer[(self.delay.write_idx.wrapping_sub(1)) & 2047] = x + self.coeff * delayed;
         out
     }
+
+    pub(crate) fn reset(&mut self) {
+        self.delay.reset();
+        self.lfo_phase = 0.0;
+    }
 }

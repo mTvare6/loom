@@ -48,6 +48,12 @@ impl NightEngine {
         let gain = 10.0_f32.powf(-reduction_db / 20.0);
         (left * gain, right * gain)
     }
+
+    pub fn reset(&mut self) {
+        self.fir.reset();
+        self.detector_power = 0.0;
+    }
+
 }
 
 #[cfg(test)]

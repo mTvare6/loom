@@ -41,6 +41,13 @@ impl Biquad {
         y
     }
 
+    pub(crate) fn reset(&mut self) {
+        self.x1 = 0.0;
+        self.x2 = 0.0;
+        self.y1 = 0.0;
+        self.y2 = 0.0;
+    }
+
     pub fn set_lpf(&mut self, sr: f32, freq: f32, q: f32) {
         let w0 = 2.0 * PI * freq / sr;
         let alpha = w0.sin() / (2.0 * q);
