@@ -14,3 +14,11 @@ egui = "0.33.3"
 loom-dsp = { path = "crates/loom-dsp" }
 loom-pipewire = { path = "crates/loom-pipewire" }
 loom-ipc = { path = "crates/loom-ipc" }
+
+[[bin]]
+name = "daemon"
+path = "src/bin/loomd/main.rs"
+
+[[bin]]
+name = "gui-client"
+path = "src/bin/loomctl/main.rs"

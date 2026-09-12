@@ -29,7 +29,7 @@ impl IpcServer {
                 Ok(mut stream) => {
                     let handler = f.clone();
                     thread::spawn(move || {
-                        let mut reader = BufReader::new(stream.try_clone().unwrap()); // boom
+                        let mut reader = BufReader::new(stream.try_clone().unwrap());
                         let mut line = String::new();
 
                         while let Ok(bytes_read) = reader.read_line(&mut line) {
@@ -49,7 +49,7 @@ impl IpcServer {
                                 Err(e) => {
                                     eprintln!("IPC Parse error: {}", e);
                                     let err_response = Response::Error;
-                                    let mut err_str = serde_json::to_string(&err_response).unwrap(); // boom
+                                    let mut err_str = serde_json::to_string(&err_response).unwrap();
                                     err_str.push('\n');
                                     let _ = stream.write_all(err_str.as_bytes());
                                 }
