@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 // N should be 2 power for the mask N - 1 to work
 pub(crate) struct DelayLine<const N: usize> {
     pub(crate) buffer: [f32; N],
@@ -10,6 +12,11 @@ impl<const N: usize> DelayLine<N> {
             buffer: [0.0; N],
             write_idx: 0,
         }
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.buffer.fill(0.0);
+        self.write_idx = 0;
     }
 
     #[inline(always)]

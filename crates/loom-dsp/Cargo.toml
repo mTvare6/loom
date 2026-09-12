@@ -2,6 +2,8 @@
 name = "loom-dsp"
 version = "0.1.0"
 edition = "2024"
+license = "MPL-2.0"
 
 [dependencies]
 rustfft = "6.4.1"
+signalsmith-stretch = "0.1.3"

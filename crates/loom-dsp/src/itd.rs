@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::delay::DelayLine;
 
 // Tiny delay offset for the center channel
@@ -18,5 +20,9 @@ impl MicroITD {
     #[inline(always)]
     pub(crate) fn process(&mut self, x: f32) -> f32 {
         self.delay.process_frac(x, self.delay_samples)
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.delay.reset();
     }
 }

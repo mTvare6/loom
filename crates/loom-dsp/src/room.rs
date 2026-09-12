@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::delay::DelayLine;
 
 // https://ccrma.stanford.edu/~jos/pasp/Schroeder_Reverberators.html
@@ -28,6 +30,11 @@ impl<const N: usize> Comb<N> {
         self.delay.write_idx = (self.delay.write_idx + 1) & (N - 1);
         out
     }
+
+    fn reset(&mut self) {
+        self.delay.reset();
+        self.damp_state = 0.0;
+    }
 }
 
 struct StaticAllpass<const N: usize> {
@@ -53,6 +60,10 @@ impl<const N: usize> StaticAllpass<N> {
         self.delay.buffer[self.delay.write_idx] = x + self.coeff * delayed;
         self.delay.write_idx = (self.delay.write_idx + 1) & (N - 1);
         out
+    }
+
+    fn reset(&mut self) {
+        self.delay.reset();
     }
 }
 
@@ -97,5 +108,14 @@ impl StereoRoom {
         let out_r = self.a_r1.process(combs_r * 0.5);
 
         (out_l, out_r)
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.c_l1.reset();
+        self.c_l2.reset();
+        self.c_r1.reset();
+        self.c_r2.reset();
+        self.a_l1.reset();
+        self.a_r1.reset();
     }
 }

@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use std::f32::consts::{PI, SQRT_2};
 
 // https://webaudio.github.io/Audio-EQ-Cookbook/audio-eq-cookbook.html
@@ -39,6 +41,13 @@ impl Biquad {
         self.y2 = self.y1;
         self.y1 = y;
         y
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.x1 = 0.0;
+        self.x2 = 0.0;
+        self.y1 = 0.0;
+        self.y2 = 0.0;
     }
 
     pub fn set_lpf(&mut self, sr: f32, freq: f32, q: f32) {

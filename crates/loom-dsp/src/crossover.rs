@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::Biquad;
 
 // https://en.wikipedia.org/wiki/Linkwitz%E2%80%93Riley_filter
@@ -30,5 +32,12 @@ impl LR4 {
             self.lp2.process(self.lp1.process(x)),
             self.hp2.process(self.hp1.process(x)),
         )
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.lp1.reset();
+        self.lp2.reset();
+        self.hp1.reset();
+        self.hp2.reset();
     }
 }

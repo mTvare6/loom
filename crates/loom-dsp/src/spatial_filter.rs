@@ -1,9 +1,11 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::{
     Biquad, crossfeed::Crossfeed, crossover::LR4, decorrelator::ModAllPass,
     early_reflections::EarlyReflections, itd::MicroITD, room::StereoRoom,
 };
 
-pub struct SpatialEngine {
+pub struct SpatialFilterEngine {
     cross1_l: LR4,
     cross1_r: LR4,
     cross2_l: LR4,
@@ -26,7 +28,7 @@ pub struct SpatialEngine {
     intensity: f32,
 }
 
-impl SpatialEngine {
+impl SpatialFilterEngine {
     pub fn new(sr: f32) -> Box<Self> {
         // Taps are delay ms then gain then air absorption LPF Hz
         let t_l = [
@@ -81,6 +83,23 @@ impl SpatialEngine {
 
     pub fn update_params(&mut self, intensity: f32) {
         self.intensity = intensity;
+    }
+
+    pub fn reset(&mut self) {
+        self.cross1_l.reset();
+        self.cross1_r.reset();
+        self.cross2_l.reset();
+        self.cross2_r.reset();
+        self.pinna_notch.reset();
+        self.center_itd.reset();
+        self.xf_l.reset();
+        self.xf_r.reset();
+        self.decorr_l.reset();
+        self.decorr_r.reset();
+        self.er_l.reset();
+        self.er_r.reset();
+        self.room.reset();
+        self.transient_env = 0.0;
     }
 
     // Saturates nicely instead of harsh hollow feeling

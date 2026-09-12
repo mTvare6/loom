@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::delay::DelayLine;
 use std::f32::consts::PI;
 
@@ -52,5 +54,12 @@ impl EarlyReflections {
         }
         self.delay.write_idx = (self.delay.write_idx + 1) & 4095;
         out
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.delay.reset();
+        for tap in &mut self.taps {
+            tap.state = 0.0;
+        }
     }
 }

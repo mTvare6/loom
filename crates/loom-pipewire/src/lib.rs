@@ -1,4 +1,9 @@
-use loom_dsp::{Mode, SpatialEngine, SurroundEngine};
+// SPDX-License-Identifier: MPL-2.0
+
+use loom_dsp::{
+    AmbienceEngine, FidelityEngine, Mode, NightEngine, PitchEngine, SpatialFilterEngine,
+    SpatialStereoEngine, SpatialSurroundEngine, SurroundEngine,
+};
 use pipewire as pw;
 use pw::{
     channel,
@@ -10,9 +15,16 @@ use std::{rc::Rc, sync::Arc};
 
 mod routing;
 
+// FIXME: Track add_buffer events and use that limit instead
+// of relying on un-exporting MAX_BUFFER limit from source
+// https://gitlab.freedesktop.org/pipewire/pipewire/-/raw/1.6.8/src/pipewire/filter.c#L29
+const MAX_PIPEWIRE_PORT_BUFFERS: u8 = 64;
+
 pub trait AudioControls: Send + Sync + 'static {
     fn volume(&self) -> f32;
     fn mode(&self) -> Mode;
+    fn pitch_enabled(&self) -> bool;
+    fn pitch_semitones(&self) -> f32;
 }
 
 pub struct ShutdownTransmitter(channel::Sender<()>);
@@ -32,9 +44,50 @@ impl ShutdownTransmitter {
 struct Processor {
     filter: FilterRc,
     ports: [PortHandle; 4],
-    spatial: Box<SpatialEngine>,
+    spatial_filter: Box<SpatialFilterEngine>,
+    spatial_stereo: Box<SpatialStereoEngine>,
+    spatial_surround: Box<SpatialSurroundEngine>,
     surround: Box<SurroundEngine>,
+    ambience: Box<AmbienceEngine>,
+    fidelity: Box<FidelityEngine>,
+    night: Box<NightEngine>,
+    pitch: Box<PitchEngine>,
+    pitch_was_enabled: bool,
+    input_already_disconnected: bool,
+    output_buffer_resets_left: u8,
+    active_mode: Mode,
     state: Arc<dyn AudioControls>,
+}
+
+impl Processor {
+    fn reset_all(&mut self) {
+        self.spatial_filter.reset();
+        self.spatial_stereo.reset();
+        self.spatial_surround.reset();
+        self.surround.reset();
+        self.ambience.reset();
+        self.fidelity.reset();
+        self.night.reset();
+        self.pitch.reset();
+    }
+
+    fn switch_mode(&mut self, mode: Mode) {
+        if mode == self.active_mode {
+            return;
+        }
+
+        match self.active_mode {
+            Mode::Off => {}
+            Mode::SpatialFilter => self.spatial_filter.reset(),
+            Mode::SpatialStereo => self.spatial_stereo.reset(),
+            Mode::SpatialSurround => self.spatial_surround.reset(),
+            Mode::Surround3d => self.surround.reset(),
+            Mode::Ambience => self.ambience.reset(),
+            Mode::Fidelity => self.fidelity.reset(),
+            Mode::Night => self.night.reset(),
+        }
+        self.active_mode = mode;
+    }
 }
 
 pub fn run_audio_engine(
@@ -60,8 +113,10 @@ pub fn run_audio_engine(
         },
     )?;
 
-    let mut spatial = SpatialEngine::new(48000.0);
-    spatial.update_params(1.0);
+    // TODO: Generalize to 96k or 44.1k if input advertises that.
+    let mut spatial_filter = SpatialFilterEngine::new(48000.0);
+    // TODO: Add controls and parametrise every filter.
+    spatial_filter.update_params(1.0);
 
     let mut processor = Processor {
         filter: filter.clone(),
@@ -71,8 +126,18 @@ pub fn run_audio_engine(
             add_port(&filter, Direction::Output, "output_FL", "FL")?,
             add_port(&filter, Direction::Output, "output_FR", "FR")?,
         ],
-        spatial,
+        spatial_filter,
+        spatial_stereo: SpatialStereoEngine::new(),
+        spatial_surround: SpatialSurroundEngine::new(),
         surround: SurroundEngine::new(),
+        ambience: AmbienceEngine::new(),
+        fidelity: FidelityEngine::new(),
+        night: NightEngine::new(),
+        pitch: PitchEngine::new(),
+        pitch_was_enabled: false,
+        input_already_disconnected: true,
+        output_buffer_resets_left: 0,
+        active_mode: Mode::Off,
         state,
     };
 
@@ -82,6 +147,10 @@ pub fn run_audio_engine(
             let Ok(n_samples) = position.clock.duration.try_into() else {
                 return;
             };
+            let volume = processor.state.volume();
+            let mode = processor.state.mode();
+            processor.switch_mode(mode);
+
             let [input_left, input_right, output_left, output_right] = &mut processor.ports;
             let buffers = unsafe {
                 (
@@ -91,24 +160,64 @@ pub fn run_audio_engine(
                     processor.filter.dsp_buffer::<f32>(output_right, n_samples),
                 )
             };
-            let (Some(input_left), Some(input_right), Some(output_left), Some(output_right)) =
-                buffers
-            else {
+            let (input_left, input_right, Some(output_left), Some(output_right)) = buffers else {
                 return;
             };
-
-            let volume = processor.state.volume();
-            let mode = processor.state.mode();
+            let (Some(input_left), Some(input_right)) = (input_left, input_right) else {
+                // No input left anymore
+                let input_just_disconnected = !processor.input_already_disconnected;
+                if input_just_disconnected {
+                    processor.input_already_disconnected = true;
+                    processor.output_buffer_resets_left = MAX_PIPEWIRE_PORT_BUFFERS;
+                }
+                if processor.output_buffer_resets_left > 0 {
+                    // At 8,192 bytes per callback and 48k per second
+                    // 384kBps if spent zeroing. They are coallesed to save bandwidth
+                    output_left.fill(0.0);
+                    output_right.fill(0.0);
+                    processor.output_buffer_resets_left -= 1;
+                }
+                if input_just_disconnected {
+                    processor.reset_all();
+                }
+                return;
+            };
+            processor.input_already_disconnected = false;
+            processor.output_buffer_resets_left = 0;
 
             for i in 0..n_samples as usize {
                 let (left, right) = match mode {
                     Mode::Off => (input_left[i], input_right[i]),
-                    Mode::Spatial => processor.spatial.process(input_left[i], input_right[i]),
+                    Mode::SpatialFilter => processor
+                        .spatial_filter
+                        .process(input_left[i], input_right[i]),
+                    Mode::SpatialStereo => processor
+                        .spatial_stereo
+                        .process(input_left[i], input_right[i]),
+                    Mode::SpatialSurround => processor
+                        .spatial_surround
+                        .process(input_left[i], input_right[i]),
                     Mode::Surround3d => processor.surround.process(input_left[i], input_right[i]),
+                    Mode::Ambience => processor.ambience.process(input_left[i], input_right[i]),
+                    Mode::Fidelity => processor.fidelity.process(input_left[i], input_right[i]),
+                    Mode::Night => processor.night.process(input_left[i], input_right[i]),
                 };
                 output_left[i] = left * volume;
                 output_right[i] = right * volume;
             }
+
+            let pitch_enabled = processor.state.pitch_enabled();
+            if pitch_enabled {
+                if !processor.pitch_was_enabled {
+                    processor.pitch.reset();
+                }
+                processor.pitch.process(
+                    output_left,
+                    output_right,
+                    processor.state.pitch_semitones(),
+                );
+            }
+            processor.pitch_was_enabled = pitch_enabled;
         })
         .register()?;
 

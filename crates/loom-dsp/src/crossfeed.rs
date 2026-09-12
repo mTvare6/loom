@@ -1,3 +1,5 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use crate::{Biquad, delay::DelayLine};
 
 // Head blocks high freq from going to opp side
@@ -22,5 +24,10 @@ impl Crossfeed {
     #[inline(always)]
     pub(crate) fn process(&mut self, x: f32) -> f32 {
         self.shelf.process(self.delay.process(x, self.samples))
+    }
+
+    pub(crate) fn reset(&mut self) {
+        self.delay.reset();
+        self.shelf.reset();
     }
 }

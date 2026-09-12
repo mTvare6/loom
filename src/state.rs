@@ -1,10 +1,17 @@
+// SPDX-License-Identifier: MPL-2.0
+
 use loom_dsp::Mode;
 use loom_ipc::{Request, Response};
-use std::sync::atomic::{AtomicU8, AtomicU32, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
+// FIXME: State graph should allow more complicate transition
+// structure. Fidelity should be valid across different modes
+// and a two-state solution is neccesary.
 pub struct AudioState {
     volume: AtomicU32,
     mode: AtomicU8,
+    pitch_enabled: AtomicBool,
+    pitch_semitones: AtomicU32,
 }
 
 impl AudioState {
@@ -12,6 +19,8 @@ impl AudioState {
         Self {
             volume: AtomicU32::new(initial_volume.to_bits()),
             mode: AtomicU8::new(Mode::Off as u8),
+            pitch_enabled: AtomicBool::new(false),
+            pitch_semitones: AtomicU32::new(0.0_f32.to_bits()),
         }
     }
 
@@ -29,20 +38,51 @@ impl AudioState {
         self.mode.store(mode as u8, Ordering::Relaxed);
     }
 
+    pub fn pitch_enabled(&self) -> bool {
+        self.pitch_enabled.load(Ordering::Relaxed)
+    }
+
+    pub fn set_pitch_enabled(&self, enabled: bool) {
+        self.pitch_enabled.store(enabled, Ordering::Relaxed);
+    }
+
+    pub fn pitch_semitones(&self) -> f32 {
+        f32::from_bits(self.pitch_semitones.load(Ordering::Relaxed))
+    }
+
+    pub fn set_pitch_semitones(&self, semitones: f32) {
+        self.pitch_semitones
+            .store(semitones.clamp(-12.0, 12.0).to_bits(), Ordering::Relaxed);
+    }
+
     pub fn handle_query(&self, request: Request) -> Response {
         match request {
-            Request::SetVolume(v) => {
-                self.set_volume(v);
+            Request::SetVolume(volume) => {
+                self.set_volume(volume);
                 Response::Ok
             }
-            Request::SetMode(m) => {
-                self.set_mode(Mode::from_u8(m));
+            Request::SetMode(mode) => {
+                self.set_mode(Mode::from_u8(mode));
                 Response::Ok
             }
             Request::GetState => Response::State {
                 volume: self.volume(),
                 mode: self.mode() as u8,
+                pitch_enabled: self.pitch_enabled(),
+                pitch: self.pitch_semitones(),
             },
+            Request::SetPitchEnabled(pitch_enabled) => {
+                self.set_pitch_enabled(pitch_enabled);
+                Response::Ok
+            }
+            Request::SetPitch(pitch) => {
+                if self.pitch_enabled() {
+                    self.set_pitch_semitones(pitch);
+                    Response::Ok
+                } else {
+                    Response::Error
+                }
+            }
         }
     }
 }
@@ -54,5 +94,13 @@ impl loom_pipewire::AudioControls for AudioState {
 
     fn mode(&self) -> Mode {
         AudioState::mode(self)
+    }
+
+    fn pitch_enabled(&self) -> bool {
+        AudioState::pitch_enabled(self)
+    }
+
+    fn pitch_semitones(&self) -> f32 {
+        AudioState::pitch_semitones(self)
     }
 }
