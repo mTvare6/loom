@@ -13,3 +13,4 @@ eframe = "0.33.3"
 egui = "0.33.3"
 loom-dsp = { path = "crates/loom-dsp" }
 loom-pipewire = { path = "crates/loom-pipewire" }
+palette = { version = "0.7.7", default-features = false, features = ["std"] }

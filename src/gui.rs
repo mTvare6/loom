@@ -5,6 +5,7 @@
 use crate::state::AudioState;
 use eframe::egui;
 use loom_dsp::Mode;
+use palette::{Clamp, FromColor, Mix, Oklab, Srgb};
 use std::sync::Arc;
 
 const DARK0_HARD: egui::Color32 = egui::Color32::from_rgb(29, 32, 33);
@@ -148,7 +149,7 @@ impl eframe::App for LoomApp {
                                 ui,
                                 "NIGHT",
                                 ModeIcon::Night,
-                                BRIGHT_PURPLE,
+                                BRIGHT_RED,
                                 selected == Mode::Night,
                             ),
                             pitch_control(ui, &mut pitch_enabled, &mut pitch_semitones),
@@ -367,7 +368,7 @@ impl ModeIcon {
                 "#..#.#..#",
                 "#...#...#",
                 "##..#..##",
-                "..##.##..",
+                "..#####..",
                 "....#....",
             ],
             Self::Ambience => &[
@@ -460,16 +461,13 @@ fn pitch_control(ui: &mut egui::Ui, enabled: &mut bool, semitones: &mut f32) -> 
 
     let marker_offset = semitones.clamp(-12.0, 12.0) / 12.0 * HALF_ARC;
     let marker_angle = marker_offset - FRAC_PI_2;
+    let gradient_position = (semitones.clamp(-12.0, 12.0) + 12.0) / 24.0;
     paint_pitch_wheel(
         ui.painter(),
         center,
-        if *enabled || response.hovered() {
-            BRIGHT_RED
-        } else {
-            LIGHT3
-        },
         marker_angle,
-        *enabled,
+        gradient_position,
+        *enabled || response.hovered(),
     );
     let label = if *enabled {
         format!("PITCH {:+.1}", *semitones)
@@ -507,29 +505,55 @@ fn pitch_from_direction(direction: egui::Vec2) -> f32 {
 fn paint_pitch_wheel(
     painter: &egui::Painter,
     center: egui::Pos2,
-    color: egui::Color32,
     marker_angle: f32,
-    enabled: bool,
+    gradient_position: f32,
+    show_gradient: bool,
 ) {
     use std::f32::consts::{FRAC_PI_2, PI};
 
     const ARC_RADIUS: f32 = 25.0;
     const HALF_ARC: f32 = PI * 0.75;
-    const ARC_SEGMENTS: usize = 48;
+    const ARC_SEGMENTS: usize = 64;
     let start = -FRAC_PI_2 - HALF_ARC;
-    let arc = (0..=ARC_SEGMENTS)
-        .map(|segment| {
-            let progress = segment as f32 / ARC_SEGMENTS as f32;
+
+    let pitch_gradient = |amount: f32| -> egui::Color32 {
+        let to_oklab = |color: egui::Color32| {
+            Oklab::from_color(Srgb::new(
+                color.r() as f32 / 255.0,
+                color.g() as f32 / 255.0,
+                color.b() as f32 / 255.0,
+            ))
+        };
+        let color = to_oklab(BRIGHT_BLUE).mix(to_oklab(BRIGHT_RED), amount);
+        let color: Srgb<u8> = Srgb::from_color(color).clamp().into_format();
+        egui::Color32::from_rgb(color.red, color.green, color.blue)
+    };
+
+    for segment in 0..ARC_SEGMENTS {
+        let from_progress = segment as f32 / ARC_SEGMENTS as f32;
+        let to_progress = (segment + 1) as f32 / ARC_SEGMENTS as f32;
+        let point = |progress: f32| {
             let angle = start + progress * HALF_ARC * 2.0;
             center + egui::vec2(angle.cos(), angle.sin()) * ARC_RADIUS
-        })
-        .collect();
-    painter.add(egui::Shape::line(arc, egui::Stroke::new(2.0_f32, color)));
+        };
+        let color = if show_gradient {
+            pitch_gradient(from_progress)
+        } else {
+            LIGHT3
+        };
+        painter.line_segment(
+            [point(from_progress), point(to_progress)],
+            egui::Stroke::new(2.0_f32, color),
+        );
+    }
 
-    let marker_color = if enabled { BRIGHT_YELLOW } else { LIGHT3 };
+    let marker_color = if show_gradient {
+        pitch_gradient(gradient_position)
+    } else {
+        LIGHT3
+    };
     paint_pitch_handle(painter, center, marker_angle, marker_color);
-
-    paint_pitch_arrows(painter, center, color);
+    paint_pitch_arrows(painter, center, marker_color);
 }
 
 fn paint_pitch_handle(
