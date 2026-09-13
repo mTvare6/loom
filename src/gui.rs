@@ -5,129 +5,278 @@ use eframe::egui;
 use saq_dsp::Mode;
 use std::sync::Arc;
 
+const DARK0_HARD: egui::Color32 = egui::Color32::from_rgb(29, 32, 33);
+const DARK0: egui::Color32 = egui::Color32::from_rgb(40, 40, 40);
+const DARK0_SOFT: egui::Color32 = egui::Color32::from_rgb(50, 48, 47);
+const DARK2: egui::Color32 = egui::Color32::from_rgb(80, 73, 69);
+const LIGHT0: egui::Color32 = egui::Color32::from_rgb(251, 241, 199);
+const LIGHT1: egui::Color32 = egui::Color32::from_rgb(235, 219, 178);
+const LIGHT3: egui::Color32 = egui::Color32::from_rgb(189, 174, 147);
+const BRIGHT_RED: egui::Color32 = egui::Color32::from_rgb(251, 73, 52);
+const BRIGHT_GREEN: egui::Color32 = egui::Color32::from_rgb(184, 187, 38);
+const BRIGHT_YELLOW: egui::Color32 = egui::Color32::from_rgb(250, 189, 47);
+const BRIGHT_BLUE: egui::Color32 = egui::Color32::from_rgb(131, 165, 152);
+const BRIGHT_PURPLE: egui::Color32 = egui::Color32::from_rgb(211, 134, 155);
+const BRIGHT_AQUA: egui::Color32 = egui::Color32::from_rgb(142, 192, 124);
+const BRIGHT_ORANGE: egui::Color32 = egui::Color32::from_rgb(254, 128, 25);
+const LOGO_BLACK: egui::Color32 = egui::Color32::from_rgb(40, 24, 18);
+
+const CONTENT_WIDTH: f32 = 672.0;
+const CARD_SIZE: egui::Vec2 = egui::vec2(162.0, 88.0);
+const WINDOW_SIZE: egui::Vec2 = egui::vec2(708.0, 350.0);
+
 pub fn run_gui(state: Arc<AudioState>) -> eframe::Result<()> {
     eframe::run_native(
         "Śaq",
         eframe::NativeOptions {
             viewport: egui::ViewportBuilder::default()
-                .with_inner_size([660.0, 310.0])
+                .with_inner_size(WINDOW_SIZE)
+                .with_min_inner_size(WINDOW_SIZE)
                 .with_resizable(false),
+            persist_window: false,
             ..Default::default()
         },
         Box::new(|cc| {
-            cc.egui_ctx.set_visuals(egui::Visuals::dark());
-            Ok(Box::new(SaqApp { state }))
+            configure_style(&cc.egui_ctx);
+            Ok(Box::new(SaqApp {
+                state,
+                window_size_initialized: false,
+            }))
         }),
     )
 }
 
+fn configure_style(ctx: &egui::Context) {
+    let mut style = (*ctx.style()).clone();
+    style.visuals = egui::Visuals::dark();
+    style.visuals.override_text_color = Some(LIGHT1);
+    style.visuals.panel_fill = DARK0;
+    style.visuals.window_fill = DARK0;
+    style.visuals.extreme_bg_color = DARK0_HARD;
+    style.visuals.faint_bg_color = DARK0_SOFT;
+    style.visuals.selection.bg_fill = DARK2;
+    style.visuals.selection.stroke = egui::Stroke::new(1.0_f32, LIGHT0);
+    style.spacing.item_spacing = egui::vec2(8.0, 2.0);
+    style.text_styles.insert(
+        egui::TextStyle::Button,
+        egui::FontId::new(10.0, egui::FontFamily::Monospace),
+    );
+    ctx.set_style(style);
+}
+
 struct SaqApp {
     state: Arc<AudioState>,
+    window_size_initialized: bool,
 }
 
 impl eframe::App for SaqApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        if !self.window_size_initialized {
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(WINDOW_SIZE));
+            self.window_size_initialized = true;
+        }
+
         egui::CentralPanel::default().show(ctx, |ui| {
+            ui.painter().rect_filled(ui.max_rect(), 0, DARK0);
             ui.vertical_centered(|ui| {
-                ui.heading("Śaq");
+                ui.set_max_width(CONTENT_WIDTH);
+                title_bar(ui);
+
+                let mut volume = self.state.volume();
+                volume_control(ui, &mut volume);
+                self.state.set_volume(volume);
+
+                let selected = self.state.mode();
+                let (surround, spatial_filter, spatial_stereo, spatial_surround) = ui
+                    .horizontal(|ui| {
+                        (
+                            mode_button(
+                                ui,
+                                "SURROUND SOUND",
+                                ModeIcon::Cube,
+                                BRIGHT_ORANGE,
+                                selected == Mode::SurroundSound,
+                            ),
+                            mode_button(
+                                ui,
+                                "SPATIAL FILTER",
+                                ModeIcon::Spatial,
+                                BRIGHT_AQUA,
+                                selected == Mode::SpatialFilter,
+                            ),
+                            mode_button(
+                                ui,
+                                "SPATIAL STEREO",
+                                ModeIcon::Stereo,
+                                BRIGHT_BLUE,
+                                selected == Mode::SpatialStereo,
+                            ),
+                            mode_button(
+                                ui,
+                                "SPATIAL SURROUND",
+                                ModeIcon::Orbit,
+                                BRIGHT_PURPLE,
+                                selected == Mode::SpatialSurround,
+                            ),
+                        )
+                    })
+                    .inner;
+
+                let mut pitch_enabled = self.state.pitch_enabled();
+                let mut pitch_semitones = self.state.pitch_semitones();
+                let (room, clarity, night, _pitch) = ui
+                    .horizontal(|ui| {
+                        (
+                            mode_button(
+                                ui,
+                                "ROOM",
+                                ModeIcon::Room,
+                                BRIGHT_GREEN,
+                                selected == Mode::Room,
+                            ),
+                            mode_button(
+                                ui,
+                                "CLARITY",
+                                ModeIcon::Clarity,
+                                BRIGHT_YELLOW,
+                                selected == Mode::Clarity,
+                            ),
+                            mode_button(
+                                ui,
+                                "NIGHT",
+                                ModeIcon::Night,
+                                BRIGHT_PURPLE,
+                                selected == Mode::Night,
+                            ),
+                            pitch_control(ui, &mut pitch_enabled, &mut pitch_semitones),
+                        )
+                    })
+                    .inner;
+
+                if surround.clicked() {
+                    self.state.set_mode(toggle(selected, Mode::SurroundSound));
+                } else if spatial_filter.clicked() {
+                    self.state.set_mode(toggle(selected, Mode::SpatialFilter));
+                } else if spatial_stereo.clicked() {
+                    self.state.set_mode(toggle(selected, Mode::SpatialStereo));
+                } else if spatial_surround.clicked() {
+                    self.state.set_mode(toggle(selected, Mode::SpatialSurround));
+                } else if room.clicked() {
+                    self.state.set_mode(toggle(selected, Mode::Room));
+                } else if clarity.clicked() {
+                    self.state.set_mode(toggle(selected, Mode::Clarity));
+                } else if night.clicked() {
+                    self.state.set_mode(toggle(selected, Mode::Night));
+                }
+                self.state.set_pitch_enabled(pitch_enabled);
+                self.state.set_pitch_semitones(pitch_semitones);
             });
-            ui.add_space(10.0);
-
-            let mut volume = self.state.volume();
-            let available_width = ui.available_width();
-            let volume_width = available_width * 0.75;
-            ui.horizontal(|ui| {
-                ui.add_space((available_width - volume_width) * 0.5);
-                ui.spacing_mut().slider_width = volume_width;
-                ui.add(egui::Slider::new(&mut volume, 0.0..=2.0).show_value(false));
-            });
-            self.state.set_volume(volume);
-
-            ui.add_space(12.0);
-            let selected = self.state.mode();
-            let (surround, spatial_filter, spatial_stereo, spatial_surround) = ui
-                .horizontal(|ui| {
-                    const BUTTON_ROW_WIDTH: f32 = 360.0;
-                    ui.add_space(((ui.available_width() - BUTTON_ROW_WIDTH) * 0.5).max(0.0));
-                    let surround = mode_button(
-                        ui,
-                        "3D Surround",
-                        ModeIcon::Cube,
-                        selected == Mode::SurroundSound,
-                    );
-                    let spatial_filter = mode_button(
-                        ui,
-                        "Spatial Filter",
-                        ModeIcon::Spatial,
-                        selected == Mode::SpatialFilter,
-                    );
-                    let spatial_stereo = mode_button(
-                        ui,
-                        "Spatial Stereo",
-                        ModeIcon::Spatial,
-                        selected == Mode::SpatialStereo,
-                    );
-                    let spatial_surround = mode_button(
-                        ui,
-                        "Spatial Surround",
-                        ModeIcon::Spatial,
-                        selected == Mode::SpatialSurround,
-                    );
-                    (surround, spatial_filter, spatial_stereo, spatial_surround)
-                })
-                .inner;
-
-            ui.add_space(4.0);
-            let mut pitch_enabled = self.state.pitch_enabled();
-            let mut pitch_semitones = self.state.pitch_semitones();
-            let (room, clarity, night) = ui
-                .horizontal(|ui| {
-                    const BUTTON_ROW_WIDTH: f32 = 360.0;
-                    ui.add_space(((ui.available_width() - BUTTON_ROW_WIDTH) * 0.5).max(0.0));
-                    let room = mode_button(
-                        ui,
-                        "Room",
-                        ModeIcon::Room,
-                        selected == Mode::Room,
-                    );
-                    let clarity = mode_button(
-                        ui,
-                        "Clarity",
-                        ModeIcon::Clarity,
-                        selected == Mode::Clarity,
-                    );
-                    let night = mode_button(ui, "Night", ModeIcon::Night, selected == Mode::Night);
-                    pitch_control(ui, &mut pitch_enabled, &mut pitch_semitones);
-                    (room, clarity, night)
-                })
-                .inner;
-
-            if surround.clicked() {
-                self.state.set_mode(toggle(selected, Mode::SurroundSound));
-            } else if spatial_filter.clicked() {
-                self.state.set_mode(toggle(selected, Mode::SpatialFilter));
-            } else if spatial_stereo.clicked() {
-                self.state.set_mode(toggle(selected, Mode::SpatialStereo));
-            } else if spatial_surround.clicked() {
-                self.state.set_mode(toggle(selected, Mode::SpatialSurround));
-            } else if room.clicked() {
-                self.state.set_mode(toggle(selected, Mode::Room));
-            } else if clarity.clicked() {
-                self.state.set_mode(toggle(selected, Mode::Clarity));
-            } else if night.clicked() {
-                self.state.set_mode(toggle(selected, Mode::Night));
-            }
-            self.state.set_pitch_enabled(pitch_enabled);
-            self.state.set_pitch_semitones(pitch_semitones);
         });
-
         ctx.request_repaint();
     }
+}
+
+fn title_bar(ui: &mut egui::Ui) {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(CONTENT_WIDTH, 32.0), egui::Sense::hover());
+
+    paint_logo(ui.painter(), rect.left_center() + egui::vec2(24.0, 0.0));
+    ui.painter().text(
+        rect.left_center() + egui::vec2(44.0, 0.0),
+        egui::Align2::LEFT_CENTER,
+        "ŚAQ",
+        egui::FontId::new(16.0, egui::FontFamily::Monospace),
+        LIGHT0,
+    );
+}
+
+fn paint_logo(painter: &egui::Painter, center: egui::Pos2) {
+    const PIXEL: f32 = 2.0;
+    const SUN: [&str; 12] = [
+        "..########..",
+        ".##########.",
+        "############",
+        "############",
+        "############",
+        "############",
+        "############",
+        "############",
+        "############",
+        "############",
+        ".##########.",
+        "..########..",
+    ];
+    const SAQ: [&str; 12] = [
+        "............",
+        "............",
+        "..########..",
+        ".###....###.",
+        "...#....#...",
+        "...#....#...",
+        "...#....#...",
+        "...#....#...",
+        "...#....#...",
+        "...#....#...",
+        "...#....#...",
+        "............",
+    ];
+    let origin = center - egui::vec2(12.0, 12.0);
+    for (pattern, color) in [(SUN, BRIGHT_ORANGE), (SAQ, LOGO_BLACK)] {
+        for (y, row) in pattern.iter().enumerate() {
+            for (x, pixel) in row.bytes().enumerate() {
+                if pixel == b'#' {
+                    painter.rect_filled(
+                        egui::Rect::from_min_size(
+                            origin + egui::vec2(x as f32 * PIXEL, y as f32 * PIXEL),
+                            egui::vec2(PIXEL, PIXEL),
+                        ),
+                        0,
+                        color,
+                    );
+                }
+            }
+        }
+    }
+}
+
+fn volume_control(ui: &mut egui::Ui, volume: &mut f32) -> egui::Response {
+    let (rect, _) = ui.allocate_exact_size(egui::vec2(CONTENT_WIDTH, 42.0), egui::Sense::hover());
+
+    ui.scope_builder(
+        egui::UiBuilder::new()
+            .max_rect(rect.shrink2(egui::vec2(12.0, 6.0)))
+            .layout(egui::Layout::left_to_right(egui::Align::Center)),
+        |ui| {
+            ui.label(
+                egui::RichText::new("VOL")
+                    .font(egui::FontId::new(10.0, egui::FontFamily::Monospace))
+                    .color(LIGHT3),
+            );
+            ui.add_space(6.0);
+
+            let response = ui.add_sized(
+                [532.0, 24.0],
+                egui::Slider::new(volume, 0.0..=2.0)
+                    .show_value(false)
+                    .trailing_fill(true),
+            );
+
+            ui.add_space(6.0);
+            ui.label(
+                egui::RichText::new(format!("{:>3}%", (*volume * 100.0).round() as i32))
+                    .font(egui::FontId::new(10.0, egui::FontFamily::Monospace))
+                    .color(LIGHT1),
+            );
+            response
+        },
+    )
+    .inner
 }
 
 #[derive(Clone, Copy)]
 enum ModeIcon {
     Spatial,
+    Stereo,
+    Orbit,
     Cube,
     Room,
     Clarity,
@@ -142,149 +291,150 @@ fn toggle(selected: Mode, clicked: Mode) -> Mode {
     }
 }
 
-fn mode_button(ui: &mut egui::Ui, label: &str, icon: ModeIcon, selected: bool) -> egui::Response {
-    let (rect, response) = ui.allocate_exact_size(egui::vec2(84.0, 80.0), egui::Sense::click());
+fn mode_button(
+    ui: &mut egui::Ui,
+    label: &str,
+    icon: ModeIcon,
+    accent: egui::Color32,
+    selected: bool,
+) -> egui::Response {
+    let (rect, response) = ui.allocate_exact_size(CARD_SIZE, egui::Sense::click());
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-    let visuals = ui.style().interact_selectable(&response, selected);
-    let icon_center = egui::pos2(rect.center().x, rect.top() + 28.0);
-    if selected {
-        ui.painter().circle_filled(
-            icon_center,
-            19.0,
-            egui::Color32::from_rgba_unmultiplied(57, 143, 255, 12),
-        );
-        ui.painter().circle_filled(
-            icon_center,
-            14.0,
-            egui::Color32::from_rgba_unmultiplied(57, 143, 255, 20),
-        );
-    }
 
-    let icon_color = if selected {
-        egui::Color32::from_rgb(91, 182, 255)
-    } else if response.hovered() {
-        egui::Color32::from_rgb(220, 225, 235)
+    let icon_color = if selected || response.hovered() {
+        accent
     } else {
-        visuals.fg_stroke.color
+        LIGHT3
     };
-
-    match icon {
-        ModeIcon::Spatial => paint_spatial(ui.painter(), icon_center, icon_color),
-        ModeIcon::Cube => paint_cube(ui.painter(), icon_center, icon_color),
-        ModeIcon::Room => paint_room(ui.painter(), icon_center, icon_color),
-        ModeIcon::Clarity => paint_clarity(ui.painter(), icon_center, icon_color),
-        ModeIcon::Night => paint_night(ui.painter(), icon_center, icon_color),
-    }
-
-    let text_position = egui::pos2(rect.center().x, rect.bottom() - 13.0);
-    let font = egui::FontId::proportional(11.0);
-    ui.painter().text(
-        text_position,
-        egui::Align2::CENTER_BOTTOM,
-        label,
-        font.clone(),
-        visuals.text_color(),
+    paint_pixel_icon(
+        ui.painter(),
+        egui::pos2(rect.center().x, rect.top() + 34.0),
+        icon.pattern(),
+        icon_color,
     );
-    if selected {
-        ui.painter().text(
-            text_position + egui::vec2(0.45, 0.0),
-            egui::Align2::CENTER_BOTTOM,
-            label,
-            font,
-            visuals.text_color(),
-        );
-    }
-
+    ui.painter().text(
+        egui::pos2(rect.center().x, rect.bottom() - 14.0),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::FontId::new(9.0, egui::FontFamily::Monospace),
+        if selected { LIGHT0 } else { LIGHT1 },
+    );
     response
 }
 
-fn paint_spatial(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32) {
-    painter.circle_filled(center, 3.0, color);
-    painter.circle_stroke(center, 10.0, egui::Stroke::new(1.5_f32, color));
-    painter.circle_stroke(center, 18.0, egui::Stroke::new(1.5_f32, color));
-}
-
-fn paint_cube(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.5_f32, color);
-    let top = center + egui::vec2(0.0, -17.0);
-    let left = center + egui::vec2(-16.0, -8.0);
-    let right = center + egui::vec2(16.0, -8.0);
-    let middle = center + egui::vec2(0.0, 1.0);
-    let bottom_left = center + egui::vec2(-16.0, 10.0);
-    let bottom_right = center + egui::vec2(16.0, 10.0);
-    let bottom = center + egui::vec2(0.0, 19.0);
-
-    for [from, to] in [
-        [top, left],
-        [top, right],
-        [left, middle],
-        [right, middle],
-        [left, bottom_left],
-        [right, bottom_right],
-        [middle, bottom],
-        [bottom_left, bottom],
-        [bottom_right, bottom],
-    ] {
-        painter.line_segment([from, to], stroke);
+impl ModeIcon {
+    fn pattern(self) -> &'static [&'static str] {
+        match self {
+            Self::Spatial => &[
+                "#...#...#",
+                ".#..#..#.",
+                "..#.#.#..",
+                "...###...",
+                "####.####",
+                "...###...",
+                "..#.#.#..",
+                ".#..#..#.",
+                "#...#...#",
+            ],
+            Self::Stereo => &[
+                ".###...###.",
+                ".#.#...#.#.",
+                ".###...###.",
+                ".#.#...#.#.",
+                ".###...###.",
+                ".#.#...#.#.",
+                ".###...###.",
+            ],
+            Self::Orbit => &[
+                "..#####..",
+                ".#.....#.",
+                "#..###..#",
+                "#.#...#.#",
+                "#.#.#.#.#",
+                "#.#...#.#",
+                "#..###..#",
+                ".#.....#.",
+                "..#####..",
+            ],
+            Self::Cube => &[
+                "....#....",
+                "..##.##..",
+                "##.....##",
+                "#.#...#.#",
+                "#..#.#..#",
+                "#...#...#",
+                "##..#..##",
+                "..##.##..",
+                "....#....",
+            ],
+            Self::Room => &[
+                "......#..",
+                ".......#.",
+                "....#..#.",
+                ".....#..#",
+                "..#..#..#",
+                ".....#..#",
+                "....#..#.",
+                ".......#.",
+                "......#..",
+            ],
+            Self::Clarity => &[
+                "......#..",
+                "..#...#..",
+                "..#..#.#.",
+                ".#.#.#.#.",
+                ".#.#.#..#",
+                "#...#...#",
+                "#.......#",
+            ],
+            Self::Night => &[
+                ".........",
+                "...#####.",
+                "..###....",
+                "..##.....",
+                "..##.....",
+                "..##.....",
+                "..###....",
+                "...#####.",
+                ".........",
+            ],
+        }
     }
 }
 
-fn paint_room(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32) {
-    painter.circle_filled(center, 2.5, color);
-    for radius in [8.0_f32, 15.0] {
-        let points = (0..=16)
-            .map(|index| {
-                let angle = -1.25_f32 + 2.5 * index as f32 / 16.0;
-                center + egui::vec2(angle.cos() * radius, angle.sin() * radius)
-            })
-            .collect();
-        painter.add(egui::Shape::line(points, egui::Stroke::new(1.4_f32, color)));
+fn paint_pixel_icon(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    pattern: &[&str],
+    color: egui::Color32,
+) {
+    const PIXEL: f32 = 3.0;
+    let width = pattern.first().map_or(0, |row| row.len()) as f32 * PIXEL;
+    let height = pattern.len() as f32 * PIXEL;
+    let origin = center - egui::vec2(width, height) * 0.5;
+    for (y, row) in pattern.iter().enumerate() {
+        for (x, pixel) in row.bytes().enumerate() {
+            if pixel == b'#' {
+                painter.rect_filled(
+                    egui::Rect::from_min_size(
+                        origin + egui::vec2(x as f32 * PIXEL, y as f32 * PIXEL),
+                        egui::vec2(PIXEL, PIXEL),
+                    ),
+                    0,
+                    color,
+                );
+            }
+        }
     }
-}
-
-fn paint_clarity(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.5_f32, color);
-    let points = [
-        center + egui::vec2(-17.0, 4.0),
-        center + egui::vec2(-11.0, -5.0),
-        center + egui::vec2(-4.0, 8.0),
-        center + egui::vec2(4.0, -9.0),
-        center + egui::vec2(11.0, 4.0),
-        center + egui::vec2(17.0, -2.0),
-    ];
-    painter.add(egui::Shape::line(points.to_vec(), stroke));
-}
-
-fn paint_night(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32) {
-    let outer: Vec<_> = (0..=20)
-        .map(|index| {
-            let angle = 0.65_f32 + 4.9 * index as f32 / 20.0;
-            center + egui::vec2(angle.cos() * 15.0, angle.sin() * 15.0)
-        })
-        .collect();
-    let inner: Vec<_> = (0..=20)
-        .map(|index| {
-            let angle = 0.85_f32 + 4.5 * (20 - index) as f32 / 20.0;
-            center + egui::vec2(6.0 + angle.cos() * 11.0, angle.sin() * 11.0)
-        })
-        .collect();
-    painter.add(egui::Shape::line(
-        outer.into_iter().chain(inner).collect(),
-        egui::Stroke::new(1.7_f32, color),
-    ));
 }
 
 fn pitch_control(ui: &mut egui::Ui, enabled: &mut bool, semitones: &mut f32) -> egui::Response {
     use std::f32::consts::{FRAC_PI_2, PI};
 
-    const SIZE: egui::Vec2 = egui::vec2(84.0, 90.0);
-    const ARC_RADIUS: f32 = 26.0;
-    const ARC_HALF_ANGLE: f32 = PI * 0.75;
-    const INNER_RADIUS: f32 = 16.0;
-
-    let (rect, response) = ui.allocate_exact_size(SIZE, egui::Sense::click_and_drag());
+    const HALF_ARC: f32 = PI * 0.75;
+    let (rect, response) = ui.allocate_exact_size(CARD_SIZE, egui::Sense::click_and_drag());
     let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
-    let center = egui::pos2(rect.center().x, rect.top() + 38.0);
+    let center = egui::pos2(rect.center().x, rect.top() + 35.0);
     let pointer = response.interact_pointer_pos();
     let pointer_radius = pointer.map_or(0.0, |position| position.distance(center));
     let was_enabled = *enabled;
@@ -292,151 +442,143 @@ fn pitch_control(ui: &mut egui::Ui, enabled: &mut bool, semitones: &mut f32) -> 
     if response.clicked() {
         if !was_enabled {
             *enabled = true;
-        } else if pointer_radius <= INNER_RADIUS {
+        } else if pointer_radius < 16.0 {
             *enabled = false;
         }
     }
-
     if was_enabled
         && *enabled
-        && pointer_radius > INNER_RADIUS
-        && (response.dragged() || response.clicked())
+        && pointer_radius >= 16.0
+        && (response.clicked() || response.dragged())
         && let Some(pointer) = pointer
     {
         *semitones = pitch_from_direction(pointer - center);
     }
 
-    let visuals = ui.style().interact_selectable(&response, *enabled);
-    let icon_color = if *enabled {
-        egui::Color32::from_rgb(91, 182, 255)
-    } else if response.hovered() {
-        egui::Color32::from_rgb(220, 225, 235)
-    } else {
-        visuals.fg_stroke.color
-    };
-
-    if *enabled {
-        ui.painter().circle_filled(
-            center,
-            16.0,
-            egui::Color32::from_rgba_unmultiplied(57, 143, 255, 18),
-        );
-        let arc = (0..=48)
-            .map(|index| {
-                let offset = -ARC_HALF_ANGLE + 2.0 * ARC_HALF_ANGLE * index as f32 / 48.0;
-                let angle = offset - FRAC_PI_2;
-                center + egui::vec2(angle.cos(), angle.sin()) * ARC_RADIUS
-            })
-            .collect();
-        ui.painter().add(egui::Shape::line(
-            arc,
-            egui::Stroke::new(1.5_f32, egui::Color32::from_gray(85)),
-        ));
-
-        let zero_inner = center + egui::vec2(0.0, -ARC_RADIUS + 3.0);
-        let zero_outer = center + egui::vec2(0.0, -ARC_RADIUS - 4.0);
-        ui.painter().line_segment(
-            [zero_inner, zero_outer],
-            egui::Stroke::new(1.7_f32, egui::Color32::from_gray(190)),
-        );
-        ui.painter().text(
-            center + egui::vec2(0.0, -ARC_RADIUS - 5.0),
-            egui::Align2::CENTER_BOTTOM,
-            ((*semitones * 10.).round() / 10.).to_string(),
-            egui::FontId::proportional(9.0),
-            egui::Color32::from_gray(190),
-        );
-
-        let marker_offset = semitones.clamp(-12.0, 12.0) / 12.0 * ARC_HALF_ANGLE;
-        let marker_angle = marker_offset - FRAC_PI_2;
-        let marker = center + egui::vec2(marker_angle.cos(), marker_angle.sin()) * ARC_RADIUS;
-        ui.painter().circle_filled(marker, 3.4, icon_color);
-    }
-
-    paint_pitch(ui.painter(), center, icon_color);
-    let text_position = egui::pos2(rect.center().x, rect.bottom() - 5.0);
-    let font = egui::FontId::proportional(11.0);
-    ui.painter().text(
-        text_position,
-        egui::Align2::CENTER_BOTTOM,
-        "Pitch",
-        font.clone(),
-        visuals.text_color(),
+    let marker_offset = semitones.clamp(-12.0, 12.0) / 12.0 * HALF_ARC;
+    let marker_angle = marker_offset - FRAC_PI_2;
+    paint_pitch_wheel(
+        ui.painter(),
+        center,
+        if *enabled || response.hovered() {
+            BRIGHT_RED
+        } else {
+            LIGHT3
+        },
+        marker_angle,
+        *enabled,
     );
-    if *enabled {
-        ui.painter().text(
-            text_position + egui::vec2(0.45, 0.0),
-            egui::Align2::CENTER_BOTTOM,
-            "Pitch",
-            font,
-            visuals.text_color(),
-        );
-    }
-
+    let label = if *enabled {
+        format!("PITCH {:+.1}", *semitones)
+    } else {
+        "PITCH".to_owned()
+    };
+    ui.painter().text(
+        egui::pos2(rect.center().x, rect.bottom() - 14.0),
+        egui::Align2::CENTER_CENTER,
+        label,
+        egui::FontId::new(9.0, egui::FontFamily::Monospace),
+        if *enabled { LIGHT0 } else { LIGHT1 },
+    );
     response
 }
 
 fn pitch_from_direction(direction: egui::Vec2) -> f32 {
     use std::f32::consts::{FRAC_PI_2, PI};
 
-    const ARC_HALF_ANGLE: f32 = PI * 0.75;
-    const ZERO_SNAP_SEMITONES: f32 = 0.25;
-    let mut angle_from_zero = direction.y.atan2(direction.x) + FRAC_PI_2;
-    if angle_from_zero > PI {
-        angle_from_zero -= 2.0 * PI;
-    } else if angle_from_zero < -PI {
-        angle_from_zero += 2.0 * PI;
+    const HALF_ARC: f32 = PI * 0.75;
+    let mut angle = direction.y.atan2(direction.x) + FRAC_PI_2;
+    if angle > PI {
+        angle -= 2.0 * PI;
+    } else if angle < -PI {
+        angle += 2.0 * PI;
     }
-    let raw = angle_from_zero.clamp(-ARC_HALF_ANGLE, ARC_HALF_ANGLE) / ARC_HALF_ANGLE * 12.0;
-    if raw.abs() <= ZERO_SNAP_SEMITONES {
+    let semitones = angle.clamp(-HALF_ARC, HALF_ARC) / HALF_ARC * 12.0;
+    if semitones.abs() <= 0.25 {
         0.0
     } else {
-        raw
+        semitones
     }
 }
 
-fn paint_pitch(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32) {
-    let stroke = egui::Stroke::new(1.6_f32, color);
-    painter.line_segment(
-        [
-            center + egui::vec2(-7.0, -8.0),
-            center + egui::vec2(-7.0, 8.0),
+fn paint_pitch_wheel(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    color: egui::Color32,
+    marker_angle: f32,
+    enabled: bool,
+) {
+    use std::f32::consts::{FRAC_PI_2, PI};
+
+    const ARC_RADIUS: f32 = 25.0;
+    const HALF_ARC: f32 = PI * 0.75;
+    const ARC_SEGMENTS: usize = 48;
+    let start = -FRAC_PI_2 - HALF_ARC;
+    let arc = (0..=ARC_SEGMENTS)
+        .map(|segment| {
+            let progress = segment as f32 / ARC_SEGMENTS as f32;
+            let angle = start + progress * HALF_ARC * 2.0;
+            center + egui::vec2(angle.cos(), angle.sin()) * ARC_RADIUS
+        })
+        .collect();
+    painter.add(egui::Shape::line(arc, egui::Stroke::new(2.0_f32, color)));
+
+    let marker_color = if enabled { BRIGHT_YELLOW } else { LIGHT3 };
+    paint_pitch_handle(painter, center, marker_angle, marker_color);
+
+    paint_pitch_arrows(painter, center, color);
+}
+
+fn paint_pitch_handle(
+    painter: &egui::Painter,
+    center: egui::Pos2,
+    angle: f32,
+    color: egui::Color32,
+) {
+    const RADIUS: f32 = 25.0;
+    const HALF_LENGTH: f32 = 5.0;
+    const HALF_WIDTH: f32 = 3.0;
+    let radial = egui::vec2(angle.cos(), angle.sin());
+    let tangent = egui::vec2(-radial.y, radial.x);
+    let block_center = center + radial * RADIUS;
+    painter.add(egui::Shape::convex_polygon(
+        vec![
+            block_center - tangent * HALF_LENGTH - radial * HALF_WIDTH,
+            block_center + tangent * HALF_LENGTH - radial * HALF_WIDTH,
+            block_center + tangent * HALF_LENGTH + radial * HALF_WIDTH,
+            block_center - tangent * HALF_LENGTH + radial * HALF_WIDTH,
         ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            center + egui::vec2(-12.0, 3.0),
-            center + egui::vec2(-7.0, 8.0),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            center + egui::vec2(-2.0, 3.0),
-            center + egui::vec2(-7.0, 8.0),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            center + egui::vec2(7.0, -8.0),
-            center + egui::vec2(7.0, 8.0),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            center + egui::vec2(2.0, -3.0),
-            center + egui::vec2(7.0, -8.0),
-        ],
-        stroke,
-    );
-    painter.line_segment(
-        [
-            center + egui::vec2(12.0, -3.0),
-            center + egui::vec2(7.0, -8.0),
-        ],
-        stroke,
-    );
+        color,
+        egui::Stroke::new(1.0_f32, DARK0),
+    ));
+}
+
+fn paint_pitch_arrows(painter: &egui::Painter, center: egui::Pos2, color: egui::Color32) {
+    const PIXEL: f32 = 2.0;
+    const PATTERN: [&str; 7] = [
+        ".#....#..",
+        "###...#..",
+        ".#....#..",
+        ".#....#..",
+        ".#....#..",
+        ".#...###.",
+        ".#....#..",
+    ];
+    let width = PATTERN[0].len() as f32 * PIXEL;
+    let height = PATTERN.len() as f32 * PIXEL;
+    let origin = center - egui::vec2(width, height) * 0.5;
+    for (y, row) in PATTERN.iter().enumerate() {
+        for (x, pixel) in row.bytes().enumerate() {
+            if pixel == b'#' {
+                painter.rect_filled(
+                    egui::Rect::from_min_size(
+                        origin + egui::vec2(x as f32 * PIXEL, y as f32 * PIXEL),
+                        egui::vec2(PIXEL, PIXEL),
+                    ),
+                    0,
+                    color,
+                );
+            }
+        }
+    }
 }
