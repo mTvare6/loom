@@ -13,3 +13,4 @@ eframe = "0.33.3"
 egui = "0.33.3"
 saq-dsp = { path = "crates/saq-dsp" }
 saq-pipewire = { path = "crates/saq-pipewire" }
+palette = { version = "0.7.7", default-features = false, features = ["std"] }
