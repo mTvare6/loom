@@ -5,12 +5,29 @@ edition = "2024"
 license = "MPL-2.0"
 
 [workspace]
-members = ["crates/saq-dsp", "crates/saq-pipewire"]
+members = ["crates/saq-dsp", "crates/saq-ipc", "crates/saq-pipewire"]
 resolver = "3"
 
 [dependencies]
 eframe = "0.33.3"
 egui = "0.33.3"
+tracing-subscriber = "0.3.23"
+tracing = "0.1.44"
+tracing-appender = "0.2.5"
+serde_json = "1.0"
+palette = { version = "0.7.7", default-features = false, features = ["std"] }
 saq-dsp = { path = "crates/saq-dsp" }
 saq-pipewire = { path = "crates/saq-pipewire" }
-palette = { version = "0.7.7", default-features = false, features = ["std"] }
+saq-ipc = { path = "crates/saq-ipc" }
+
+[[bin]]
+name = "saqd"
+path = "src/bin/saqd/main.rs"
+
+[[bin]]
+name = "saq"
+path = "src/bin/saq/main.rs"
+
+[[bin]]
+name = "saqctl"
+path = "src/bin/saqctl/main.rs"

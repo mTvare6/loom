@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use saq_dsp::Mode;
+use saq_ipc::{Request, Response};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
-
 
 // FIXME: State graph should allow more complicate transition
 // structure. Clarity should be valid across different modes
@@ -53,6 +53,37 @@ impl AudioState {
     pub fn set_pitch_semitones(&self, semitones: f32) {
         self.pitch_semitones
             .store(semitones.clamp(-12.0, 12.0).to_bits(), Ordering::Relaxed);
+    }
+
+    pub fn handle_query(&self, request: Request) -> Response {
+        match request {
+            Request::SetVolume(volume) => {
+                self.set_volume(volume);
+                Response::Ok
+            }
+            Request::SetMode(mode) => {
+                self.set_mode(Mode::from_u8(mode));
+                Response::Ok
+            }
+            Request::GetState => Response::State {
+                volume: self.volume(),
+                mode: self.mode() as u8,
+                pitch_enabled: self.pitch_enabled(),
+                pitch: self.pitch_semitones(),
+            },
+            Request::SetPitchEnabled(pitch_enabled) => {
+                self.set_pitch_enabled(pitch_enabled);
+                Response::Ok
+            }
+            Request::SetPitch(pitch) => {
+                if self.pitch_enabled() {
+                    self.set_pitch_semitones(pitch);
+                    Response::Ok
+                } else {
+                    Response::Error
+                }
+            }
+        }
     }
 }
 
