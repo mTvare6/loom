@@ -27,4 +27,18 @@ impl Mode {
             _ => Self::Off,
         }
     }
+
+    pub fn from_str(s: &str) -> Option<Self> {
+        match s {
+            "Off" => Some(Self::Off),
+            "SpatialFilter" => Some(Self::SpatialFilter),
+            "Surround3d" => Some(Self::Surround3d),
+            "Ambience" => Some(Self::Ambience),
+            "Fidelity" => Some(Self::Fidelity),
+            "Night" => Some(Self::Night),
+            "SpatialStereo" => Some(Self::SpatialStereo),
+            "SpatialSurround" => Some(Self::SpatialSurround),
+            _ => None,
+        }
+    }
 }

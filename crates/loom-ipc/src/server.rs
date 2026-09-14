@@ -1,9 +1,10 @@
 use std::fs;
 use std::io::{BufRead, BufReader, Write};
-use std::os::unix::net::UnixListener;
+use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
+use tracing::{error, info};
 
 use crate::{Request, Response};
 
@@ -18,55 +19,68 @@ impl IpcServer {
         }
     }
 
-    // TODO: Handle errors
-    pub fn run<F: Fn(Request) -> Response + Send + Sync + 'static>(&self, f: Arc<F>) {
-        let _ = fs::remove_file(&self.socket);
-        let listener = UnixListener::bind(&self.socket).expect("Failed to bind socket");
-        println!("IPC Server listening on {:?}", self.socket);
+    pub fn run<F: Fn(Request) -> Response + Send + Sync + 'static>(
+        &self,
+        f: Arc<F>,
+    ) -> std::io::Result<()> {
+        match fs::remove_file(&self.socket) {
+            Ok(()) => {}
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) => return Err(error),
+        }
+
+        let listener = UnixListener::bind(&self.socket)?;
+        info!("IPC Server listening on {:?}", self.socket);
 
         for stream in listener.incoming() {
             match stream {
-                Ok(mut stream) => {
+                Ok(stream) => {
                     let handler = f.clone();
                     thread::spawn(move || {
-                        let mut reader = BufReader::new(stream.try_clone().unwrap());
-                        let mut line = String::new();
-
-                        while let Ok(bytes_read) = reader.read_line(&mut line) {
-                            if bytes_read == 0 {
-                                break;
-                            }
-
-                            match serde_json::from_str::<Request>(&line) {
-                                Ok(req) => {
-                                    let response = handler(req);
-
-                                    if let Ok(mut response_str) = serde_json::to_string(&response) {
-                                        response_str.push('\n');
-                                        let _ = stream.write_all(response_str.as_bytes());
-                                    }
-                                }
-                                Err(e) => {
-                                    eprintln!("IPC Parse error: {}", e);
-                                    let err_response = Response::Error;
-                                    let mut err_str = serde_json::to_string(&err_response).unwrap();
-                                    err_str.push('\n');
-                                    let _ = stream.write_all(err_str.as_bytes());
-                                }
-                            }
-
-                            line.clear();
+                        if let Err(error) = handle_client(stream, handler) {
+                            error!("IPC client error: {}", error);
                         }
                     });
                 }
-                Err(e) => eprintln!("Failed to accept client: {}", e),
+                Err(error) => error!("Failed to accept client: {}", error),
             }
         }
+
+        Ok(())
     }
 }
 
 impl Drop for IpcServer {
     fn drop(&mut self) {
         let _ = fs::remove_file(&self.socket);
+    }
+}
+
+fn handle_client<F: Fn(Request) -> Response + Send + Sync + 'static>(
+    mut stream: UnixStream,
+    handler: Arc<F>,
+) -> std::io::Result<()> {
+    let mut reader = BufReader::new(stream.try_clone()?);
+    let mut line = String::new();
+
+    loop {
+        line.clear();
+        let bytes_read = reader.read_line(&mut line)?;
+
+        if bytes_read == 0 {
+            return Ok(());
+        }
+
+        let response = match serde_json::from_str::<Request>(&line) {
+            Ok(request) => handler(request),
+            Err(error) => {
+                error!("IPC parse error: {}", error);
+                Response::Error
+            }
+        };
+
+        let mut response_str = serde_json::to_string(&response).map_err(std::io::Error::other)?;
+        response_str.push('\n');
+        stream.write_all(response_str.as_bytes())?;
     }
 }
