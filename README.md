@@ -9,8 +9,14 @@ PipeWire devel headers for your distribution.
 ### Building & Running
 
 ```sh
-cargo build --release
+# daemon
 cargo run --release
+
+# gui client
+cargo run --bin saq --release
+
+# cli client
+cargo run --bin saqctl --release -- pitch_enabled true
 ```
 
 ### Roadmap
