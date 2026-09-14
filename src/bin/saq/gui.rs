@@ -303,16 +303,59 @@ fn volume_control(ui: &mut egui::Ui, volume: &mut f32) -> egui::Response {
             );
             ui.add_space(6.0);
 
-            let response = ui.add_sized(
-                [532.0, 24.0],
-                egui::Slider::new(volume, 0.0..=2.0)
-                    .show_value(false)
-                    .trailing_fill(true),
+            let (slider_rect, response) =
+                ui.allocate_exact_size(egui::vec2(500.0, 24.0), egui::Sense::drag());
+            let mut response = response.on_hover_cursor(egui::CursorIcon::ResizeHorizontal);
+
+            let drag = response.drag_delta().x;
+            if drag != 0.0 {
+                let track_width = slider_rect.width() - 10.0;
+                let next_volume = if drag < 0.0 {
+                    let position = (volume_visual_position(*volume) + drag / track_width).max(0.0);
+                    volume_from_visual_position(position)
+                } else {
+                    let sensitivity = if *volume < 1.0 {
+                        2.0 / track_width
+                    } else if *volume < 2.0 {
+                        4.0 / track_width
+                    } else {
+                        4.0 / track_width / (1.0 + *volume - 2.0)
+                    };
+                    *volume + drag * sensitivity
+                };
+                if next_volume.to_bits() != volume.to_bits() {
+                    *volume = next_volume;
+                    response.mark_changed();
+                }
+            }
+
+            let track = egui::Rect::from_center_size(
+                slider_rect.center(),
+                egui::vec2(slider_rect.width() - 10.0, 4.0),
             );
+            let handle_x = egui::lerp(
+                track.left()..=track.right(),
+                volume_visual_position(*volume),
+            );
+            ui.painter().rect_filled(track, 0, DARK2);
+            ui.painter().rect_filled(
+                egui::Rect::from_min_max(track.left_top(), egui::pos2(handle_x, track.bottom())),
+                0,
+                BRIGHT_AQUA,
+            );
+            ui.painter().rect_filled(
+                egui::Rect::from_center_size(
+                    egui::pos2(handle_x, slider_rect.center().y),
+                    egui::vec2(8.0, 14.0),
+                ),
+                0,
+                if response.hovered() { LIGHT0 } else { LIGHT1 },
+            );
+            response.widget_info(|| egui::WidgetInfo::slider(true, *volume as f64, "Volume"));
 
             ui.add_space(6.0);
             ui.label(
-                egui::RichText::new(format!("{:>3}%", (*volume * 100.0).round() as i32))
+                egui::RichText::new(volume_percent(*volume))
                     .font(egui::FontId::new(10.0, egui::FontFamily::Monospace))
                     .color(LIGHT1),
             );
@@ -320,6 +363,39 @@ fn volume_control(ui: &mut egui::Ui, volume: &mut f32) -> egui::Response {
         },
     )
     .inner
+}
+
+fn volume_visual_position(volume: f32) -> f32 {
+    const OVERDRIVE_CURVE: f32 = 0.08;
+
+    if volume <= 1.0 {
+        volume * 0.5
+    } else if volume <= 2.0 {
+        0.5 + (volume - 1.0) * 0.25
+    } else {
+        0.75 + 0.25 * (1.0 - (OVERDRIVE_CURVE * (2.0 - volume)).exp())
+    }
+}
+
+fn volume_from_visual_position(position: f32) -> f32 {
+    const OVERDRIVE_CURVE: f32 = 0.08;
+
+    if position <= 0.5 {
+        position * 2.0
+    } else if position <= 0.75 {
+        1.0 + (position - 0.5) * 4.0
+    } else {
+        2.0 - (1.0 - (position - 0.75) * 4.0).ln() / OVERDRIVE_CURVE
+    }
+}
+
+fn volume_percent(volume: f32) -> String {
+    let percent = volume as f64 * 100.0;
+    if percent < 10_000.0 {
+        format!("{percent:>3.0}%")
+    } else {
+        format!("{percent:.1e}%")
+    }
 }
 
 #[derive(Clone, Copy)]

@@ -3,6 +3,7 @@ name = "saq"
 version = "0.1.0"
 edition = "2024"
 license = "MPL-2.0"
+default-run = "saqd"
 
 [workspace]
 members = ["crates/saq-dsp", "crates/saq-ipc", "crates/saq-pipewire"]
