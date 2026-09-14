@@ -2,11 +2,11 @@
 
 // Proceed with caution when trying to understand the code
 // File was completely generated in parts
-use crate::state::AudioState;
 use eframe::egui;
 use loom_dsp::Mode;
+use loom_ipc::{IpcClient, Request, Response};
 use palette::{Clamp, FromColor, Mix, Oklab, Srgb};
-use std::sync::Arc;
+use std::path::Path;
 
 const DARK0_HARD: egui::Color32 = egui::Color32::from_rgb(29, 32, 33);
 const DARK0: egui::Color32 = egui::Color32::from_rgb(40, 40, 40);
@@ -29,7 +29,26 @@ const CARD_SIZE: egui::Vec2 = egui::vec2(162.0, 88.0);
 const WINDOW_SIZE: egui::Vec2 = egui::vec2(708.0, 350.0);
 
 // FIXME: Rewrite it with hand and understand GUI options
-pub fn run_gui(state: Arc<AudioState>) -> eframe::Result<()> {
+pub fn run_gui(socket: impl AsRef<Path>) -> eframe::Result<()> {
+    let mut ipc_client = match IpcClient::new(socket) {
+        Ok(client) => client,
+        Err(error) => panic!("{:?}", error),
+    };
+
+    let state = ipc_client
+        .send(loom_ipc::Request::GetState)
+        .expect("Failed to get state");
+
+    let (volume, mode, pitch_enabled, pitch_semitones) = match state {
+        Response::State {
+            volume,
+            mode,
+            pitch_enabled,
+            pitch,
+        } => (volume, Mode::from_u8(mode), pitch_enabled, pitch),
+        _ => unreachable!(),
+    };
+
     eframe::run_native(
         "Loom",
         eframe::NativeOptions {
@@ -43,11 +62,24 @@ pub fn run_gui(state: Arc<AudioState>) -> eframe::Result<()> {
         Box::new(|cc| {
             configure_style(&cc.egui_ctx);
             Ok(Box::new(LoomApp {
-                state,
+                ipc_client,
+                volume,
+                mode,
+                pitch_enabled,
+                pitch_semitones,
                 window_size_initialized: false,
             }))
         }),
     )
+}
+
+fn handle_respose(respose: std::io::Result<Response>) {
+    match respose {
+        Err(err) => {
+            eprintln!("Loom daemon error: {}", err)
+        }
+        _ => {}
+    }
 }
 
 fn configure_style(ctx: &egui::Context) {
@@ -69,7 +101,11 @@ fn configure_style(ctx: &egui::Context) {
 }
 
 struct LoomApp {
-    state: Arc<AudioState>,
+    ipc_client: IpcClient,
+    volume: f32,
+    mode: Mode,
+    pitch_enabled: bool,
+    pitch_semitones: f32,
     window_size_initialized: bool,
 }
 
@@ -86,11 +122,8 @@ impl eframe::App for LoomApp {
                 ui.set_max_width(CONTENT_WIDTH);
                 title_bar(ui);
 
-                let mut volume = self.state.volume();
-                volume_control(ui, &mut volume);
-                self.state.set_volume(volume);
+                let volume = volume_control(ui, &mut self.volume);
 
-                let selected = self.state.mode();
                 let (surround, spatial_filter, spatial_stereo, spatial_surround) = ui
                     .horizontal(|ui| {
                         (
@@ -99,36 +132,34 @@ impl eframe::App for LoomApp {
                                 "3D SURROUND",
                                 ModeIcon::Cube,
                                 BRIGHT_ORANGE,
-                                selected == Mode::Surround3d,
+                                self.mode == Mode::Surround3d,
                             ),
                             mode_button(
                                 ui,
                                 "SPATIAL FILTER",
                                 ModeIcon::Spatial,
                                 BRIGHT_AQUA,
-                                selected == Mode::SpatialFilter,
+                                self.mode == Mode::SpatialFilter,
                             ),
                             mode_button(
                                 ui,
                                 "SPATIAL STEREO",
                                 ModeIcon::Stereo,
                                 BRIGHT_BLUE,
-                                selected == Mode::SpatialStereo,
+                                self.mode == Mode::SpatialStereo,
                             ),
                             mode_button(
                                 ui,
                                 "SPATIAL SURROUND",
                                 ModeIcon::Orbit,
                                 BRIGHT_PURPLE,
-                                selected == Mode::SpatialSurround,
+                                self.mode == Mode::SpatialSurround,
                             ),
                         )
                     })
                     .inner;
 
-                let mut pitch_enabled = self.state.pitch_enabled();
-                let mut pitch_semitones = self.state.pitch_semitones();
-                let (ambience, fidelity, night, _pitch) = ui
+                let (ambience, fidelity, night, pitch) = ui
                     .horizontal(|ui| {
                         (
                             mode_button(
@@ -136,44 +167,62 @@ impl eframe::App for LoomApp {
                                 "AMBIENCE",
                                 ModeIcon::Ambience,
                                 BRIGHT_GREEN,
-                                selected == Mode::Ambience,
+                                self.mode == Mode::Ambience,
                             ),
                             mode_button(
                                 ui,
                                 "FIDELITY",
                                 ModeIcon::Fidelity,
                                 BRIGHT_YELLOW,
-                                selected == Mode::Fidelity,
+                                self.mode == Mode::Fidelity,
                             ),
                             mode_button(
                                 ui,
                                 "NIGHT",
                                 ModeIcon::Night,
                                 BRIGHT_RED,
-                                selected == Mode::Night,
+                                self.mode == Mode::Night,
                             ),
-                            pitch_control(ui, &mut pitch_enabled, &mut pitch_semitones),
+                            pitch_control(ui, &mut self.pitch_enabled, &mut self.pitch_semitones),
                         )
                     })
                     .inner;
 
-                if surround.clicked() {
-                    self.state.set_mode(toggle(selected, Mode::Surround3d));
+                let new_mode = if surround.clicked() {
+                    toggle(self.mode, Mode::Surround3d)
                 } else if spatial_filter.clicked() {
-                    self.state.set_mode(toggle(selected, Mode::SpatialFilter));
+                    toggle(self.mode, Mode::SpatialFilter)
                 } else if spatial_stereo.clicked() {
-                    self.state.set_mode(toggle(selected, Mode::SpatialStereo));
+                    toggle(self.mode, Mode::SpatialStereo)
                 } else if spatial_surround.clicked() {
-                    self.state.set_mode(toggle(selected, Mode::SpatialSurround));
+                    toggle(self.mode, Mode::SpatialSurround)
                 } else if ambience.clicked() {
-                    self.state.set_mode(toggle(selected, Mode::Ambience));
+                    toggle(self.mode, Mode::Ambience)
                 } else if fidelity.clicked() {
-                    self.state.set_mode(toggle(selected, Mode::Fidelity));
+                    toggle(self.mode, Mode::Fidelity)
                 } else if night.clicked() {
-                    self.state.set_mode(toggle(selected, Mode::Night));
+                    toggle(self.mode, Mode::Night)
+                } else {
+                    self.mode
+                };
+
+                if new_mode != self.mode {
+                    handle_respose(self.ipc_client.send(Request::SetMode(new_mode as u8)));
+                    self.mode = new_mode;
                 }
-                self.state.set_pitch_enabled(pitch_enabled);
-                self.state.set_pitch_semitones(pitch_semitones);
+                if volume.changed() {
+                    handle_respose(self.ipc_client.send(Request::SetVolume(self.volume)));
+                }
+                if pitch.changed() {
+                    handle_respose(
+                        self.ipc_client
+                            .send(Request::SetPitchEnabled(self.pitch_enabled)),
+                    );
+                    handle_respose(
+                        self.ipc_client
+                            .send(Request::SetPitch(self.pitch_semitones)),
+                    );
+                }
             });
         });
         ctx.request_repaint();
@@ -437,13 +486,14 @@ fn pitch_control(ui: &mut egui::Ui, enabled: &mut bool, semitones: &mut f32) -> 
 
     const HALF_ARC: f32 = PI * 0.75;
     let (rect, response) = ui.allocate_exact_size(CARD_SIZE, egui::Sense::click_and_drag());
-    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let mut response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
     let center = egui::pos2(rect.center().x, rect.top() + 35.0);
     let pointer = response.interact_pointer_pos();
     let pointer_radius = pointer.map_or(0.0, |position| position.distance(center));
     let was_enabled = *enabled;
 
     if response.clicked() {
+        response.mark_changed();
         if !was_enabled {
             *enabled = true;
         } else if pointer_radius < 16.0 {
@@ -457,6 +507,7 @@ fn pitch_control(ui: &mut egui::Ui, enabled: &mut bool, semitones: &mut f32) -> 
         && let Some(pointer) = pointer
     {
         *semitones = pitch_from_direction(pointer - center);
+        response.mark_changed();
     }
 
     let marker_offset = semitones.clamp(-12.0, 12.0) / 12.0 * HALF_ARC;
