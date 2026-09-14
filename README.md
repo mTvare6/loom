@@ -15,10 +15,21 @@ cargo run --release
 
 ### Roadmap
 
-- [ ] Persistence
+- [ ] EQ and presets
+  - [ ] Presets
+  - [ ] [Controls](https://signalsmith-audio.co.uk/writing/2021/monotonic-smooth-interpolation/) to create preset
+- [ ] UX
+  - [ ] Persistence
+  - [ ] Non-RT features
+  - [ ] deamon-mode and IPC support
+- [ ] PipeWire features
+  - [ ] n.1 input (n > 2)
+  - [ ] Variable sample rate
+- [ ] Desktop integration
+  - [ ] Init systems
+  - [ ] Package mangers
+  - [ ] Desktop environment-like projects
 - [ ] Explore additional spatial-audio techniques
-- [ ] Non-RT features
-- [ ] deamon-mode and IPC support
 
 ### License
 

@@ -15,6 +15,7 @@ tracing-subscriber = "0.3.23"
 tracing = "0.1.44"
 tracing-appender = "0.2.5"
 serde_json = "1.0"
+palette = { version = "0.7.7", default-features = false, features = ["std"] }
 loom-dsp = { path = "crates/loom-dsp" }
 loom-pipewire = { path = "crates/loom-pipewire" }
 loom-ipc = { path = "crates/loom-ipc" }
