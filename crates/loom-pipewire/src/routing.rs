@@ -1,6 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use pipewire as pw;
+use pw::spa::utils::result::AsyncSeq;
 use pw::{
     core::CoreRc,
     link::Link,
@@ -10,13 +11,20 @@ use pw::{
     registry::{GlobalObject, RegistryRc},
     types::ObjectType,
 };
-use std::{cell::RefCell, collections::HashMap, rc::Rc};
+
+use std::{
+    cell::RefCell,
+    collections::{HashMap, HashSet},
+    rc::Rc,
+};
 
 const FILTER_NODE_NAME: &str = "loom_virtual_sink";
 const DEFAULT_METADATA_NAME: &str = "default";
 const DEFAULT_SINK_KEY: &str = "default.audio.sink";
 const DEFAULT_SINK_TYPE: &str = "Spa:String:JSON";
 const TARGET_SINK_KEY: &str = "loom.target.audio.sink";
+const TARGET_OBJECT_KEY: &str = "target.object";
+const TARGET_OBJECT_TYPE: &str = "Spa:Id";
 
 pub(crate) struct Routing {
     // FIXME: Decide if storing semantics matters given _state has it
@@ -27,7 +35,9 @@ pub(crate) struct Routing {
 
 impl Drop for Routing {
     fn drop(&mut self) {
-        self._state.borrow_mut().restore_default_sink();
+        let mut state = self._state.borrow_mut();
+        state.prepare_shutdown();
+        state.finish_shutdown();
     }
 }
 
@@ -71,8 +81,26 @@ impl Routing {
         })
     }
 
-    pub(crate) fn restore_default_sink(&self) {
-        self._state.borrow_mut().restore_default_sink();
+    pub(crate) fn begin_shutdown(&self) -> Result<AsyncSeq, pw::Error> {
+        let core = {
+            let mut state = self._state.borrow_mut();
+            state.prepare_shutdown();
+            state.core.clone()
+        };
+        core.sync(0)
+    }
+
+    pub(crate) fn finish_shutdown(&self) -> Result<AsyncSeq, pw::Error> {
+        let core = {
+            let mut state = self._state.borrow_mut();
+            state.finish_shutdown();
+            state.core.clone()
+        };
+        core.sync(0)
+    }
+
+    pub(crate) fn release_shutdown_links(&self) {
+        self._state.borrow_mut().shutdown_links.clear();
     }
 }
 
@@ -89,6 +117,7 @@ struct Node {
     name: String,
     media_class: String,
     priority: u32,
+    serial: Option<String>,
 }
 
 impl Node {
@@ -153,7 +182,10 @@ struct State {
     filter_is_default: bool,
     output_links: HashMap<Channel, Link>,
     player_links: HashMap<(u32, Channel), Link>,
+    shutdown_links: Vec<Link>,
     linked_sink: Option<u32>,
+    shutting_down: bool,
+    shutdown_links_created: bool,
 }
 
 impl State {
@@ -173,7 +205,10 @@ impl State {
             filter_is_default: false,
             output_links: HashMap::new(),
             player_links: HashMap::new(),
+            shutdown_links: Vec::new(),
             linked_sink: None,
+            shutting_down: false,
+            shutdown_links_created: false,
         }
     }
 
@@ -197,6 +232,7 @@ impl State {
                             .get("priority.session")
                             .and_then(|value| value.parse().ok())
                             .unwrap_or(0),
+                        serial: props.get("object.serial").map(str::to_owned),
                     },
                 );
             }
@@ -343,6 +379,9 @@ impl State {
     }
 
     fn reconcile(&mut self) {
+        if self.shutting_down {
+            return;
+        }
         self.recover_target_sink();
         self.route_players();
         self.route_output();
@@ -386,8 +425,9 @@ impl State {
         self.default_sink_name = Some(target_name);
         self.default_sink_value = Some(value);
         self.using_fallback_sink = using_fallback;
+
         self.clear_output_links();
-        self.restore_default_sink();
+        self.restore_default_to_earlier_sink();
     }
 
     fn save_target_sink(&mut self) {
@@ -405,7 +445,7 @@ impl State {
             .set_property(0, TARGET_SINK_KEY, Some(DEFAULT_SINK_TYPE), Some(value));
     }
 
-    fn restore_default_sink(&mut self) {
+    fn restore_default_to_earlier_sink(&mut self) {
         if !self.filter_is_default {
             return;
         }
@@ -415,6 +455,180 @@ impl State {
         binding
             ._metadata
             .set_property(0, DEFAULT_SINK_KEY, Some(DEFAULT_SINK_TYPE), Some(value));
+    }
+
+    fn prepare_shutdown(&mut self) {
+        // Coallesce multiple signals here
+        if self.shutting_down {
+            return;
+        }
+        self.shutting_down = true;
+
+        // Some requests and operations here can be rejected
+        // TODO: Figure out a way for better error handling and
+        // re-attempts at requests.
+
+        // TODO: Defensive code here, uncomment if for some reason someone's code breaks
+        // self.redirect_to_earlier_sink();
+        // self.disconnect_sources_from_self();
+        // self.disconnect_self_from_sink();
+        self.restore_default_to_earlier_sink();
+    }
+
+    #[allow(unused)]
+    fn redirect_to_earlier_sink(&mut self) {
+        let sink_id = self.linked_sink.or_else(|| {
+            self.default_sink_name.as_ref().and_then(|name| {
+                self.nodes
+                    .values()
+                    .find(|node| node.name == *name && node.media_class == "Audio/Sink")
+                    .map(|node| node.id)
+            })
+        });
+        let Some((binding, sink_serial)) = self.metadata.as_ref().and_then(|binding| {
+            let serial = self.nodes.get(&sink_id?)?.serial.as_deref()?;
+            Some((binding, serial))
+        }) else {
+            return;
+        };
+
+        for player in self.nodes.values().filter(|node| node.is_player()) {
+            binding._metadata.set_property(
+                player.id,
+                TARGET_OBJECT_KEY,
+                Some(TARGET_OBJECT_TYPE),
+                Some(sink_serial),
+            );
+        }
+    }
+
+    #[allow(unused)]
+    fn disconnect_sources_from_self(&mut self) {
+        let Some(filter_id) = self
+            .nodes
+            .values()
+            .find(|node| node.name == FILTER_NODE_NAME)
+            .map(|node| node.id)
+        else {
+            self.player_links.clear();
+            return;
+        };
+        let player_ids: HashSet<u32> = self
+            .nodes
+            .values()
+            .filter(|node| node.is_player())
+            .map(|node| node.id)
+            .collect();
+        let owned_link_ids: HashSet<u32> = self
+            .player_links
+            .values()
+            .map(|link| link.upcast_ref().id())
+            .collect();
+        let external_link_ids: Vec<u32> = self
+            .links
+            .values()
+            .filter(|link| {
+                player_ids.contains(&link.output_node)
+                    && link.input_node == filter_id
+                    && !owned_link_ids.contains(&link.id)
+            })
+            .map(|link| link.id)
+            .collect();
+
+        self.player_links.clear();
+        for link_id in external_link_ids {
+            let _ = self.registry.destroy_global(link_id);
+            self.links.remove(&link_id);
+        }
+    }
+
+    #[allow(unused)]
+    fn disconnect_self_from_sink(&mut self) {
+        let Some(filter_id) = self
+            .nodes
+            .values()
+            .find(|node| node.name == FILTER_NODE_NAME)
+            .map(|node| node.id)
+        else {
+            self.output_links.clear();
+            return;
+        };
+        let owned_link_ids: HashSet<u32> = self
+            .output_links
+            .values()
+            .map(|link| link.upcast_ref().id())
+            .collect();
+        let external_link_ids: Vec<u32> = self
+            .links
+            .values()
+            .filter(|link| link.output_node == filter_id && !owned_link_ids.contains(&link.id))
+            .map(|link| link.id)
+            .collect();
+
+        self.output_links.clear();
+        // linked_sink is not invalidated and used later to set default
+        for link_id in external_link_ids {
+            let _ = self.registry.destroy_global(link_id);
+            self.links.remove(&link_id);
+        }
+    }
+
+    fn finish_shutdown(&mut self) {
+        if self.shutdown_links_created {
+            return;
+        }
+        self.shutdown_links_created = true;
+
+        let sink_id = self.linked_sink.or_else(|| {
+            self.default_sink_name.as_ref().and_then(|name| {
+                self.nodes
+                    .values()
+                    .find(|node| node.name == *name && node.media_class == "Audio/Sink")
+                    .map(|node| node.id)
+            })
+        });
+        let Some(sink_id) = sink_id else {
+            eprintln!("Loom could not restore player links: the target output is unavailable");
+            return;
+        };
+
+        let player_ids: Vec<u32> = self
+            .nodes
+            .values()
+            .filter(|node| node.is_player())
+            .map(|node| node.id)
+            .collect();
+
+        let player_count = player_ids.len();
+        for player_id in player_ids {
+            for channel in [Channel::Left, Channel::Right] {
+                let output = find_port(&self.ports, player_id, PortDirection::Output, channel)
+                    .or_else(|| {
+                        find_port(&self.ports, player_id, PortDirection::Output, Channel::Mono)
+                    });
+                let input = find_port(&self.ports, sink_id, PortDirection::Input, channel);
+                let (Some(output), Some(input)) = (output, input) else {
+                    continue;
+                };
+                if self
+                    .links
+                    .values()
+                    .any(|link| link.output_port == output.id && link.input_port == input.id)
+                {
+                    continue;
+                }
+
+                match create_link(&self.core, output, input, false, true) {
+                    Ok(link) => self.shutdown_links.push(link),
+                    Err(error) => {
+                        eprintln!("Loom could not restore a direct player link: {error}")
+                    }
+                }
+            }
+        }
+        if player_count > 0 && self.shutdown_links.is_empty() {
+            eprintln!("Loom could not restore any direct player links");
+        }
     }
 
     fn route_players(&mut self) {
@@ -461,7 +675,7 @@ impl State {
                     continue;
                 }
 
-                match create_link(&self.core, output, input, false) {
+                match create_link(&self.core, output, input, false, false) {
                     Ok(link) => {
                         self.player_links.insert(key, link);
                     }
@@ -535,7 +749,7 @@ impl State {
                 continue;
             };
 
-            match create_link(&self.core, output, input, true) {
+            match create_link(&self.core, output, input, true, false) {
                 Ok(link) => {
                     self.output_links.insert(channel, link);
                 }
@@ -566,12 +780,19 @@ fn find_port(
         .copied()
 }
 
-fn create_link(core: &CoreRc, output: Port, input: Port, passive: bool) -> Result<Link, pw::Error> {
+fn create_link(
+    core: &CoreRc,
+    output: Port,
+    input: Port,
+    passive: bool,
+    linger: bool,
+) -> Result<Link, pw::Error> {
     let output_node = output.node_id.to_string();
     let output_port = output.id.to_string();
     let input_node = input.node_id.to_string();
     let input_port = input.id.to_string();
     let passive = passive.to_string();
+    let linger = if linger { "1" } else { "0" };
 
     core.create_object(
         "link-factory",
@@ -581,6 +802,7 @@ fn create_link(core: &CoreRc, output: Port, input: Port, passive: bool) -> Resul
             "link.input.node" => input_node,
             "link.input.port" => input_port,
             *pw::keys::LINK_PASSIVE => passive,
+            *pw::keys::OBJECT_LINGER => linger,
         },
     )
 }

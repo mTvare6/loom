@@ -3,8 +3,15 @@
 mod state;
 
 use loom_ipc::IpcServer;
+
+use signal_hook::consts::{SIGINT, SIGTERM};
+use signal_hook::flag;
 use state::AudioState;
-use std::{sync::Arc, thread::JoinHandle};
+use std::sync::{
+    Arc,
+    atomic::{AtomicBool, Ordering},
+};
+use std::thread::JoinHandle;
 use tracing::{error, info};
 use tracing_appender::non_blocking::WorkerGuard;
 
@@ -42,7 +49,7 @@ impl Drop for AudioThread {
 
 // We need to change these paths
 fn init_logging() -> WorkerGuard {
-    let file_appender = tracing_appender::rolling::daily("/tmp", "loom_daemon.log");
+    let file_appender = tracing_appender::rolling::daily("/tmp", "loomd.log");
     let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
 
     tracing_subscriber::fmt()
@@ -54,18 +61,31 @@ fn init_logging() -> WorkerGuard {
     guard
 }
 
-// TODO: maybe use env variable for the socket
 fn main() {
-    let _wg = init_logging();
+    let _ = init_logging();
 
     info!("Starting loom daemon");
 
     let shared_state = Arc::new(AudioState::new(1.0));
-    let _audio_thread = AudioThread::start(shared_state.clone());
+    let stop_ipc = Arc::new(AtomicBool::new(false));
+
+    // Sets inner Arc<AtomicBool> to true
+    flag::register(SIGINT, stop_ipc.clone()).expect("Couldn't register a SIGINT handler");
+    flag::register(SIGTERM, stop_ipc.clone()).expect("Couldn't register a SIGTERM handler");
+
+    let audio_thread = AudioThread::start(shared_state.clone());
+
+    // TODO: Have socket location to be chosen more carefully or be configurable
     let ipc_server = IpcServer::new("/tmp/loom_audio.sock");
-    let state = shared_state.clone();
-    match ipc_server.run(Arc::new(move |request| state.handle_query(request))) {
-        Err(error) => error!("Ipc Server exitted with error: {}", error),
-        Ok(()) => {}
+    let state = shared_state;
+
+    if let Err(error) = ipc_server
+        .run_until(Arc::new(move |request| state.handle_query(request)), || {
+            stop_ipc.load(Ordering::Acquire)
+        })
+    {
+        error!("IPC server exited with error: {error}");
     }
+
+    drop(audio_thread)
 }

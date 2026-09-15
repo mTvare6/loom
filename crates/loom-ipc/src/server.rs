@@ -4,7 +4,9 @@ use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::thread;
+use std::time::Duration;
 use tracing::{error, info};
+use std::io::ErrorKind;
 
 use crate::{Request, Response};
 
@@ -19,28 +21,40 @@ impl IpcServer {
         }
     }
 
-    pub fn run<F: Fn(Request) -> Response + Send + Sync + 'static>(
+    pub fn run_until<F: Fn(Request) -> Response + Send + Sync + 'static, S: Fn() -> bool>(
         &self,
         f: Arc<F>,
+        should_stop: S,
     ) -> std::io::Result<()> {
         match fs::remove_file(&self.socket) {
             Ok(()) => {}
-            Err(error) if error.kind() == std::io::ErrorKind::NotFound => {}
+            Err(error) if error.kind() == ErrorKind::NotFound => {}
             Err(error) => return Err(error),
         }
 
         let listener = UnixListener::bind(&self.socket)?;
+
+        // Generally it blocks the thread waiting for another
+        // Having it be nonblocking allows should_stop to be run exiting
+        // run_until and allowing audio thread to be dropped and exit gracefully
+        listener.set_nonblocking(true)?;
+
         info!("IPC Server listening on {:?}", self.socket);
 
-        for stream in listener.incoming() {
-            match stream {
-                Ok(stream) => {
+        while !should_stop() {
+            match listener.accept() {
+                Ok((stream, _address)) => {
                     let handler = f.clone();
+                    // Each client is handled in it's thread
                     thread::spawn(move || {
                         if let Err(error) = handle_client(stream, handler) {
                             error!("IPC client error: {}", error);
                         }
                     });
+                }
+                // Would've been blocking at this point but explicitly disabled
+                Err(error) if error.kind() == ErrorKind::WouldBlock => {
+                    thread::sleep(Duration::from_millis(20));
                 }
                 Err(error) => error!("Failed to accept client: {}", error),
             }

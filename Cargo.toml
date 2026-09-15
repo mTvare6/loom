@@ -20,15 +20,4 @@ palette = { version = "0.7.7", default-features = false, features = ["std"] }
 loom-dsp = { path = "crates/loom-dsp" }
 loom-pipewire = { path = "crates/loom-pipewire" }
 loom-ipc = { path = "crates/loom-ipc" }
-
-[[bin]]
-name = "loomd"
-path = "src/bin/loomd/main.rs"
-
-[[bin]]
-name = "loom"
-path = "src/bin/loom/main.rs"
-
-[[bin]]
-name = "loomctl"
-path = "src/bin/loomctl/main.rs"
+signal-hook = "0.3.18"
