@@ -11,7 +11,8 @@ use pw::{
     properties::properties,
     spa::utils::Direction,
 };
-use std::{rc::Rc, sync::Arc};
+
+use std::{cell::Cell, rc::Rc, sync::Arc, time::Duration};
 
 mod routing;
 
@@ -19,6 +20,7 @@ mod routing;
 // of relying on un-exporting MAX_BUFFER limit from source
 // https://gitlab.freedesktop.org/pipewire/pipewire/-/raw/1.6.8/src/pipewire/filter.c#L29
 const MAX_PIPEWIRE_PORT_BUFFERS: u8 = 64;
+const SHUTDOWN_LINK_SETTLE_TIME: Duration = Duration::from_millis(50);
 
 pub trait AudioControls: Send + Sync + 'static {
     fn volume(&self) -> f32;
@@ -224,17 +226,115 @@ pub fn run_audio_engine(
     filter.connect(FilterFlags::RT_PROCESS, &mut [])?;
 
     let routing = Rc::new(routing::Routing::new(&core)?);
-    let mainloop_weak = mainloop.downgrade();
-    let routing_weak = Rc::downgrade(&routing);
-    let _shutdown = shutdown_rx.0.attach(mainloop.loop_(), move |_| {
-        if let Some(routing) = routing_weak.upgrade() {
-            routing.restore_default_sink();
-        }
-        if let Some(mainloop) = mainloop_weak.upgrade() {
-            mainloop.quit();
+
+    let requested_pending_seq = Rc::new(Cell::new(None));
+
+    // Mostly defensive here given we have single sync
+    // Can use Cell<bool> if finalized
+    let completed_pending_seq = Rc::new(Cell::new(None));
+
+    let (finalize_tx, finalize_rx) = channel::channel();
+
+    let request_shutdown = Rc::new({
+        let mainloop_weak = mainloop.downgrade();
+        let routing_weak = Rc::downgrade(&routing);
+
+        let disconnect_sync_pending = requested_pending_seq.clone();
+        let relink_sync_pending = completed_pending_seq.clone();
+
+        move || {
+            if disconnect_sync_pending.get().is_some() || relink_sync_pending.get().is_some() {
+                return;
+            }
+            let Some(routing) = routing_weak.upgrade() else {
+                if let Some(mainloop) = mainloop_weak.upgrade() {
+                    mainloop.quit();
+                }
+                return;
+            };
+            match routing.begin_shutdown() {
+                Ok(sequence) => disconnect_sync_pending.set(Some(sequence)),
+                Err(_) => {
+                    if let Some(mainloop) = mainloop_weak.upgrade() {
+                        mainloop.quit();
+                    }
+                }
+            }
         }
     });
 
+    let _core_listener = core
+        .add_listener_local()
+        .done({
+            let routing_weak = Rc::downgrade(&routing);
+
+            let bending_shutdown_seq_guard = requested_pending_seq.clone();
+            let final_shutdown_seq_guard = completed_pending_seq.clone();
+
+            let finalize_tx = finalize_tx.clone();
+
+            move |id, sequence| {
+                if id != pw::core::PW_ID_CORE {
+                    return;
+                }
+
+                // The final two-state solution
+                if bending_shutdown_seq_guard
+                    .get()
+                    .is_some_and(|pending| pending == sequence)
+                {
+                    bending_shutdown_seq_guard.set(None);
+
+                    let next = routing_weak
+                        .upgrade()
+                        .ok_or(pw::Error::CreationFailed)
+                        .and_then(|routing| routing.finish_shutdown());
+
+                    if let Ok(sequence) = next {
+                        final_shutdown_seq_guard.set(Some(sequence));
+                        return;
+                    }
+
+                } else if final_shutdown_seq_guard
+                    .get()
+                    .is_some_and(|pending| pending == sequence)
+                {
+                    final_shutdown_seq_guard.set(None);
+                } else {
+                    return;
+                }
+
+                std::thread::spawn({
+                    let finalize_tx = finalize_tx.clone();
+                    move || {
+                        std::thread::sleep(SHUTDOWN_LINK_SETTLE_TIME);
+                        let _ = finalize_tx.send(());
+                    }
+                });
+            }
+        })
+        .register();
+
+    let _finalize = finalize_rx.attach(mainloop.loop_(), {
+        let mainloop_weak = mainloop.downgrade();
+        let routing_weak = Rc::downgrade(&routing);
+
+        move |_| {
+            if let Some(routing) = routing_weak.upgrade() {
+                routing.release_shutdown_links();
+            }
+
+            if let Some(mainloop) = mainloop_weak.upgrade() {
+                mainloop.quit();
+            }
+        }
+    });
+
+    let _shutdown = shutdown_rx.0.attach(mainloop.loop_(), {
+        let request_shutdown = request_shutdown.clone();
+
+        move |_| request_shutdown()
+    });
     mainloop.run();
     Ok(())
 }

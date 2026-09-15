@@ -20,15 +20,4 @@ palette = { version = "0.7.7", default-features = false, features = ["std"] }
 saq-dsp = { path = "crates/saq-dsp" }
 saq-pipewire = { path = "crates/saq-pipewire" }
 saq-ipc = { path = "crates/saq-ipc" }
-
-[[bin]]
-name = "saqd"
-path = "src/bin/saqd/main.rs"
-
-[[bin]]
-name = "saq"
-path = "src/bin/saq/main.rs"
-
-[[bin]]
-name = "saqctl"
-path = "src/bin/saqctl/main.rs"
+signal-hook = "0.3.18"
