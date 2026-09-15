@@ -2,11 +2,13 @@
 
 use saq_dsp::Mode;
 use saq_ipc::{Request, Response};
+use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
 // FIXME: State graph should allow more complicate transition
 // structure. Clarity should be valid across different modes
 // and a two-state solution is neccesary.
+#[derive(Serialize, Deserialize)]
 pub struct AudioState {
     volume: AtomicU32,
     mode: AtomicU8,
