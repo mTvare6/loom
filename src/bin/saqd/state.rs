@@ -18,7 +18,7 @@ impl AudioState {
     pub fn new(initial_volume: f32) -> Self {
         Self {
             volume: AtomicU32::new(initial_volume.to_bits()),
-            mode: AtomicU8::new(Mode::Off as u8),
+            mode: AtomicU8::new(Mode::SurroundSound as u8),
             pitch_enabled: AtomicBool::new(false),
             pitch_semitones: AtomicU32::new(0.0_f32.to_bits()),
         }
