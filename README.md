@@ -23,17 +23,21 @@ cargo run --bin loomctl --release -- pitch_enabled true
 
 - [ ] EQ and presets
   - [ ] Presets
-  - [ ] [Controls](https://signalsmith-audio.co.uk/writing/2021/monotonic-smooth-interpolation/) to create preset
+  - [ ] [Controls](https://signalsmith-audio.co.uk/writing/2021/monotonic-smooth-interpolation/) to create custom preset
 - [ ] UX
-  - [ ] Persistence
+  - [x] Persistence
   - [ ] Non-RT features
-  - [ ] deamon-mode and IPC support
+  - [x] deamon-mode and IPC support
+  - [ ] Configuration files
+  - [ ] Detailed IPC error handling
+  - [ ] Better command-line parsing
+  - [ ] Colors
 - [ ] PipeWire features
   - [ ] n.1 input (n > 2)
   - [ ] Variable sample rate
 - [ ] Desktop integration
-  - [ ] Init systems
-  - [ ] Package mangers
+  - [ ] Init system integration
+  - [ ] Package mangers support
   - [ ] Desktop environment-like projects
 - [ ] Explore additional spatial-audio techniques
 
