@@ -12,19 +12,13 @@ use pw::{
     types::ObjectType,
 };
 
-use std::{
-    cell::RefCell,
-    collections::{HashMap, HashSet},
-    rc::Rc,
-};
+use std::{cell::RefCell, collections::HashMap, rc::Rc};
 
 const FILTER_NODE_NAME: &str = "loom_virtual_sink";
 const DEFAULT_METADATA_NAME: &str = "default";
 const DEFAULT_SINK_KEY: &str = "default.audio.sink";
 const DEFAULT_SINK_TYPE: &str = "Spa:String:JSON";
 const TARGET_SINK_KEY: &str = "loom.target.audio.sink";
-const TARGET_OBJECT_KEY: &str = "target.object";
-const TARGET_OBJECT_TYPE: &str = "Spa:Id";
 
 pub(crate) struct Routing {
     // FIXME: Decide if storing semantics matters given _state has it
@@ -117,7 +111,6 @@ struct Node {
     name: String,
     media_class: String,
     priority: u32,
-    serial: Option<String>,
 }
 
 impl Node {
@@ -232,7 +225,6 @@ impl State {
                             .get("priority.session")
                             .and_then(|value| value.parse().ok())
                             .unwrap_or(0),
-                        serial: props.get("object.serial").map(str::to_owned),
                     },
                 );
             }
@@ -473,104 +465,6 @@ impl State {
         // self.disconnect_sources_from_self();
         // self.disconnect_self_from_sink();
         self.restore_default_to_earlier_sink();
-    }
-
-    #[allow(unused)]
-    fn redirect_to_earlier_sink(&mut self) {
-        let sink_id = self.linked_sink.or_else(|| {
-            self.default_sink_name.as_ref().and_then(|name| {
-                self.nodes
-                    .values()
-                    .find(|node| node.name == *name && node.media_class == "Audio/Sink")
-                    .map(|node| node.id)
-            })
-        });
-        let Some((binding, sink_serial)) = self.metadata.as_ref().and_then(|binding| {
-            let serial = self.nodes.get(&sink_id?)?.serial.as_deref()?;
-            Some((binding, serial))
-        }) else {
-            return;
-        };
-
-        for player in self.nodes.values().filter(|node| node.is_player()) {
-            binding._metadata.set_property(
-                player.id,
-                TARGET_OBJECT_KEY,
-                Some(TARGET_OBJECT_TYPE),
-                Some(sink_serial),
-            );
-        }
-    }
-
-    #[allow(unused)]
-    fn disconnect_sources_from_self(&mut self) {
-        let Some(filter_id) = self
-            .nodes
-            .values()
-            .find(|node| node.name == FILTER_NODE_NAME)
-            .map(|node| node.id)
-        else {
-            self.player_links.clear();
-            return;
-        };
-        let player_ids: HashSet<u32> = self
-            .nodes
-            .values()
-            .filter(|node| node.is_player())
-            .map(|node| node.id)
-            .collect();
-        let owned_link_ids: HashSet<u32> = self
-            .player_links
-            .values()
-            .map(|link| link.upcast_ref().id())
-            .collect();
-        let external_link_ids: Vec<u32> = self
-            .links
-            .values()
-            .filter(|link| {
-                player_ids.contains(&link.output_node)
-                    && link.input_node == filter_id
-                    && !owned_link_ids.contains(&link.id)
-            })
-            .map(|link| link.id)
-            .collect();
-
-        self.player_links.clear();
-        for link_id in external_link_ids {
-            let _ = self.registry.destroy_global(link_id);
-            self.links.remove(&link_id);
-        }
-    }
-
-    #[allow(unused)]
-    fn disconnect_self_from_sink(&mut self) {
-        let Some(filter_id) = self
-            .nodes
-            .values()
-            .find(|node| node.name == FILTER_NODE_NAME)
-            .map(|node| node.id)
-        else {
-            self.output_links.clear();
-            return;
-        };
-        let owned_link_ids: HashSet<u32> = self
-            .output_links
-            .values()
-            .map(|link| link.upcast_ref().id())
-            .collect();
-        let external_link_ids: Vec<u32> = self
-            .links
-            .values()
-            .filter(|link| link.output_node == filter_id && !owned_link_ids.contains(&link.id))
-            .map(|link| link.id)
-            .collect();
-
-        self.output_links.clear();
-        // linked_sink is not invalidated and used later to set default
-        for link_id in external_link_ids {
-            let _ = self.registry.destroy_global(link_id);
-            self.links.remove(&link_id);
-        }
     }
 
     fn finish_shutdown(&mut self) {
