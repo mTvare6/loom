@@ -1,6 +1,6 @@
 # Śaq
 
-A real-time stereo spatial audio processor built on PipeWire.
+A plug and play real-time audio spatialiser for Linux.
 
 ### Libraries
 
