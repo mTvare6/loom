@@ -6,7 +6,7 @@ A real-time stereo spatial audio processor built on PipeWire.
 
 PipeWire devel headers for your distribution.
 
-### Building & Running
+### Running
 
 ```sh
 # daemon
@@ -17,6 +17,12 @@ cargo run --bin loom --release
 
 # cli client
 cargo run --bin loomctl --release -- pitch_enabled true
+```
+
+### Installing
+
+```sh
+./res/install.sh
 ```
 
 ### Roadmap
@@ -36,7 +42,7 @@ cargo run --bin loomctl --release -- pitch_enabled true
   - [ ] n.1 input (n > 2)
   - [ ] Variable sample rate
 - [ ] Desktop integration
-  - [ ] Init system integration
+  - [x] Init system integration
   - [ ] Package mangers support
   - [ ] Desktop environment-like projects
 - [ ] Explore additional spatial-audio techniques

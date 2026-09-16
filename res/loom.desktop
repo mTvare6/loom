@@ -1,0 +1,14 @@
+[Desktop Entry]
+Name=Loom
+GenericName=Audio Effects
+Exec=/usr/bin/loom
+TryExec=/usr/bin/loom
+Icon=loom
+Terminal=false
+Type=Application
+StartupNotify=true
+Categories=AudioVideo;Audio;
+Keywords=audio;effects;pipewire;spatial;surround;
+StartupWMClass=loom
+
+X-Desktop-File-Install-Version=0.28

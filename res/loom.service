@@ -1,0 +1,14 @@
+[Unit]
+Description=Loom
+After=pipewire.service wireplumber.service
+Wants=pipewire.service wireplumber.service
+
+[Service]
+Type=exec
+ExecStart=/usr/bin/loomd
+Restart=on-failure
+RestartSec=1s
+TimeoutStopSec=5s
+
+[Install]
+WantedBy=default.target

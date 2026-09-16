@@ -48,8 +48,8 @@ fn handle_response(response: std::io::Result<Response>) {
 fn main() {
     let mut args = std::env::args().skip(1);
 
-    let mut ipc_client =
-        IpcClient::new("/tmp/loom_audio.sock").expect("Failed to connect to loomd");
+    let socket = loom_ipc::socket_path().expect("Could not resolve the Loom runtime socket");
+    let mut ipc_client = IpcClient::new(socket).expect("Failed to connect to loomd");
 
     if let Some(command) = args.next() {
         match command.as_str() {

@@ -1,4 +1,5 @@
 use std::fs;
+use std::io::ErrorKind;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
@@ -6,7 +7,6 @@ use std::sync::Arc;
 use std::thread;
 use std::time::Duration;
 use tracing::{error, info};
-use std::io::ErrorKind;
 
 use crate::{Request, Response};
 
@@ -30,6 +30,10 @@ impl IpcServer {
             Ok(()) => {}
             Err(error) if error.kind() == ErrorKind::NotFound => {}
             Err(error) => return Err(error),
+        }
+
+        if let Some(parent) = self.socket.parent() {
+            fs::create_dir_all(parent)?;
         }
 
         let listener = UnixListener::bind(&self.socket)?;
