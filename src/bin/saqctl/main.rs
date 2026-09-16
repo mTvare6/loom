@@ -48,8 +48,8 @@ fn handle_response(response: std::io::Result<Response>) {
 fn main() {
     let mut args = std::env::args().skip(1);
 
-    let mut ipc_client =
-        IpcClient::new("/tmp/saq_audio.sock").expect("Failed to connect to saqd");
+    let socket = saq_ipc::socket_path().expect("Could not resolve the Śaq runtime socket");
+    let mut ipc_client = IpcClient::new(socket).expect("Failed to connect to saqd");
 
     if let Some(command) = args.next() {
         match command.as_str() {

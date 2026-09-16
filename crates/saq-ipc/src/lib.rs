@@ -2,8 +2,22 @@ mod client;
 mod server;
 
 pub use client::*;
+use directories::ProjectDirs;
 use serde::{Deserialize, Serialize};
 pub use server::*;
+use std::{
+    io::{self, Error, ErrorKind},
+    path::PathBuf,
+};
+
+pub fn socket_path() -> io::Result<PathBuf> {
+    let directories = ProjectDirs::from("com", "epestr", "saq")
+        .ok_or_else(|| Error::new(ErrorKind::NotFound, "home directory is unavailable"))?;
+    let runtime_directory = directories
+        .runtime_dir()
+        .ok_or_else(|| Error::new(ErrorKind::NotFound, "User runtime directory found"))?;
+    Ok(runtime_directory.join("saq.sock"))
+}
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
 pub enum Request {

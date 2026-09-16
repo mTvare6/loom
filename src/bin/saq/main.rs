@@ -3,5 +3,5 @@ use crate::gui::run_gui;
 mod gui;
 
 fn main() -> Result<(), eframe::Error> {
-    run_gui("/tmp/saq_audio.sock")
+    run_gui(saq_ipc::socket_path().expect("Could not resolve the Śaq runtime socket"))
 }

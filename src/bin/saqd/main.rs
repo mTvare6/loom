@@ -8,6 +8,7 @@ use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::flag;
 use state::AudioState;
 use std::fs::{self, File};
+use std::io;
 use std::path::PathBuf;
 use std::sync::{
     Arc,
@@ -15,7 +16,6 @@ use std::sync::{
 };
 use std::thread::JoinHandle;
 use tracing::{error, info, warn};
-use tracing_appender::non_blocking::WorkerGuard;
 
 struct AudioStateStore {
     path: Option<PathBuf>,
@@ -87,11 +87,26 @@ struct AudioThread {
 }
 
 impl AudioThread {
-    fn start(state: Arc<AudioState>) -> Self {
+    fn start(
+        state: Arc<AudioState>,
+        stop_ipc: Arc<AtomicBool>,
+        audio_failed: Arc<AtomicBool>,
+    ) -> Self {
         let (shutdown_tx, shutdown_rx) = saq_pipewire::shutdown_channel();
         let thread = std::thread::spawn(move || {
-            if let Err(error) = saq_pipewire::run_audio_engine(state, shutdown_rx) {
-                error!("Śaq audio stopped: {error}");
+            let result = saq_pipewire::run_audio_engine(state, shutdown_rx);
+            // mainloop stopping without signal handling likely indicates 
+            // PipeWire crashing. Handling that separately so init systems can
+            // restart (systemd has an option at least)
+            if !stop_ipc.load(Ordering::Acquire) {
+                match result {
+                    Ok(()) => error!("Śaq audio engine stopped unexpectedly"),
+                    Err(error) => error!("Śaq audio stopped: {error}"),
+                }
+                audio_failed.store(true, Ordering::Release);
+                stop_ipc.store(true, Ordering::Release);
+            } else if let Err(error) = result {
+                error!("Śaq audio shutdown failed: {error}");
             }
         });
         Self {
@@ -113,22 +128,16 @@ impl Drop for AudioThread {
     }
 }
 
-// We need to change these paths
-fn init_logging() -> WorkerGuard {
-    let file_appender = tracing_appender::rolling::daily("/tmp", "saqd.log");
-    let (non_blocking, guard) = tracing_appender::non_blocking(file_appender);
-
+// TODO: Add back logging to file after checking if not running under a init system
+fn init_logging() {
     tracing_subscriber::fmt()
-        .with_writer(non_blocking)
         .with_ansi(false)
         .with_thread_ids(true)
         .init();
-
-    guard
 }
 
-fn main() {
-    let _ = init_logging();
+fn main() -> Result<(), Box<dyn std::error::Error>> {
+    init_logging();
 
     info!("Starting saq daemon");
 
@@ -141,21 +150,27 @@ fn main() {
     flag::register(SIGINT, stop_ipc.clone()).expect("Couldn't register a SIGINT handler");
     flag::register(SIGTERM, stop_ipc.clone()).expect("Couldn't register a SIGTERM handler");
 
-    let audio_thread = AudioThread::start(shared_state.clone());
+    let audio_failed = Arc::new(AtomicBool::new(false));
+    let audio_thread =
+        AudioThread::start(shared_state.clone(), stop_ipc.clone(), audio_failed.clone());
 
-    // TODO: Have socket location to be chosen more carefully or be configurable
-    let ipc_server = IpcServer::new("/tmp/saq_audio.sock");
+    let ipc_server = IpcServer::new(saq_ipc::socket_path()?);
     let state = shared_state.clone();
 
-    if let Err(error) = ipc_server
+    let ipc_result = ipc_server
         .run_until(Arc::new(move |request| state.handle_query(request)), || {
+            // Stops with signals and audio-thread failing
             stop_ipc.load(Ordering::Acquire)
-        })
-    {
-        error!("IPC server exited with error: {error}");
-    }
+        });
+    let audio_failed = audio_failed.load(Ordering::Acquire);
 
     drop(audio_thread);
 
     state_store.save(&shared_state);
+
+    ipc_result?;
+    if audio_failed {
+        return Err(io::Error::other("Śaq audio engine stopped unexpectedly").into());
+    }
+    Ok(())
 }
