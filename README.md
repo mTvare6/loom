@@ -1,6 +1,6 @@
 # Śaq
 
-A plug and play real-time audio spatialiser for Linux.
+A real-time easy to use audio enhancer for Linux
 
 ### Libraries
 
