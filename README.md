@@ -1,6 +1,6 @@
 # loom
 
-A plug and play real-time audio spatialiser for Linux.
+A plug and play real-time audio enhancer for Linux which makes anything sound instantly better.
 
 ### Libraries
 
