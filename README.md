@@ -25,6 +25,8 @@ cargo run --bin saqctl --release -- pitch_enabled true
 ./res/install.sh
 ```
 
+This installs the systemd service and starts the daemon. Start the the GUI with `saq` to play around with the settings.
+
 ### Roadmap
 
 - [ ] EQ and presets
