@@ -1,5 +1,58 @@
 // SPDX-License-Identifier: MPL-2.0
 
+macro_rules! load_response_hrtf {
+    ($directory:literal) => {
+        [
+            [
+                $crate::convolution::read_float_wave(include_bytes!(concat!(
+                    "../assets/",
+                    $directory,
+                    "/H_LL.wav"
+                ))),
+                $crate::convolution::read_float_wave(include_bytes!(concat!(
+                    "../assets/",
+                    $directory,
+                    "/H_LR.wav"
+                ))),
+            ],
+            [
+                $crate::convolution::read_float_wave(include_bytes!(concat!(
+                    "../assets/",
+                    $directory,
+                    "/H_RL.wav"
+                ))),
+                $crate::convolution::read_float_wave(include_bytes!(concat!(
+                    "../assets/",
+                    $directory,
+                    "/H_RR.wav"
+                ))),
+            ],
+        ]
+    };
+}
+
+macro_rules! load_zeroed_diagnol_hrtf {
+    ($directory:literal) => {{
+        let h_ll = $crate::convolution::read_float_wave(include_bytes!(concat!(
+            "../assets/",
+            $directory,
+            "/H_LL.wav"
+        )));
+        let zero = vec![0.0; h_ll.len()];
+        [
+            [h_ll, zero.clone()],
+            [
+                zero,
+                $crate::convolution::read_float_wave(include_bytes!(concat!(
+                    "../assets/",
+                    $directory,
+                    "/H_RR.wav"
+                ))),
+            ],
+        ]
+    }};
+}
+
 mod room;
 mod biquad;
 mod convolution;

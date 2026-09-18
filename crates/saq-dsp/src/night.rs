@@ -1,15 +1,12 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::convolution::{StereoFir, read_float_wave};
+use crate::convolution::StereoFir;
 
 const SAMPLE_RATE: f32 = 48_000.0;
 const THRESHOLD_DBFS: f32 = -16.523_478;
 const GAIN_REDUCTION_SLOPE: f32 = 0.757_800_04;
 const ATTACK_SECONDS: f32 = 0.013_295_716;
 const RELEASE_SECONDS: f32 = 0.115_254_22;
-
-const DIRECT_LEFT: &[u8] = include_bytes!("../assets/night/direct-left.wav");
-const DIRECT_RIGHT: &[u8] = include_bytes!("../assets/night/direct-right.wav");
 
 pub struct NightEngine {
     fir: Box<StereoFir>,
@@ -20,12 +17,9 @@ pub struct NightEngine {
 
 impl NightEngine {
     pub fn new() -> Box<Self> {
-        let zero = vec![0.0; read_float_wave(DIRECT_LEFT).len()];
         Box::new(Self {
-            fir: StereoFir::new([
-                [read_float_wave(DIRECT_LEFT), zero.clone()],
-                [zero, read_float_wave(DIRECT_RIGHT)],
-            ]),
+            fir: StereoFir::new(load_zeroed_diagnol_hrtf!("night")),
+
             detector_power: 0.0,
             attack_coefficient: (-1.0 / (ATTACK_SECONDS * SAMPLE_RATE)).exp(),
             release_coefficient: (-1.0 / (RELEASE_SECONDS * SAMPLE_RATE)).exp(),
@@ -55,7 +49,6 @@ impl NightEngine {
         self.fir.reset();
         self.detector_power = 0.0;
     }
-
 }
 
 #[cfg(test)]

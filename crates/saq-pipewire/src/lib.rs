@@ -27,6 +27,7 @@ pub trait AudioControls: Send + Sync + 'static {
     fn mode(&self) -> Mode;
     fn pitch_enabled(&self) -> bool;
     fn pitch_semitones(&self) -> f32;
+    fn subwoofer(&self) -> f32;
 }
 
 pub struct ShutdownTransmitter(channel::Sender<()>);
@@ -151,6 +152,7 @@ pub fn run_audio_engine(
             };
             let volume = processor.state.volume();
             let mode = processor.state.mode();
+            let subwoofer = processor.state.subwoofer();
             processor.switch_mode(mode);
 
             let [input_left, input_right, output_left, output_right] = &mut processor.ports;
@@ -199,7 +201,11 @@ pub fn run_audio_engine(
                     Mode::SpatialSurround => processor
                         .spatial_surround
                         .process(input_left[i], input_right[i]),
-                    Mode::SurroundSound => processor.surround.process(input_left[i], input_right[i]),
+                    Mode::SurroundSound => {
+                        processor
+                            .surround
+                            .process(input_left[i], input_right[i], subwoofer)
+                    }
                     Mode::Room => processor.room.process(input_left[i], input_right[i]),
                     Mode::Clarity => processor.clarity.process(input_left[i], input_right[i]),
                     Mode::Night => processor.night.process(input_left[i], input_right[i]),
@@ -294,7 +300,6 @@ pub fn run_audio_engine(
                         final_shutdown_seq_guard.set(Some(sequence));
                         return;
                     }
-
                 } else if final_shutdown_seq_guard
                     .get()
                     .is_some_and(|pending| pending == sequence)
