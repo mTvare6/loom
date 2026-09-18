@@ -26,6 +26,7 @@ pub enum Request {
     SetMode(u8),
     SetPitchEnabled(bool),
     SetPitch(f32),
+    SetSubwoofer(f32),
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -35,6 +36,7 @@ pub enum Response {
         mode: u8,
         pitch_enabled: bool,
         pitch: f32,
+        subwoofer: f32,
     },
     Ok,
     Error,

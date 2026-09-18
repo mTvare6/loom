@@ -39,13 +39,14 @@ pub fn run_gui(socket: impl AsRef<Path>) -> eframe::Result<()> {
         .send(loom_ipc::Request::GetState)
         .expect("Failed to get state");
 
-    let (volume, mode, pitch_enabled, pitch_semitones) = match state {
+    let (volume, mode, pitch_enabled, pitch_semitones, subwoofer) = match state {
         Response::State {
             volume,
             mode,
             pitch_enabled,
             pitch,
-        } => (volume, Mode::from_u8(mode), pitch_enabled, pitch),
+            subwoofer,
+        } => (volume, Mode::from_u8(mode), pitch_enabled, pitch, subwoofer),
         _ => unreachable!(),
     };
 
@@ -67,6 +68,7 @@ pub fn run_gui(socket: impl AsRef<Path>) -> eframe::Result<()> {
                 mode,
                 pitch_enabled,
                 pitch_semitones,
+                subwoofer,
                 window_size_initialized: false,
             }))
         }),
@@ -106,6 +108,7 @@ struct LoomApp {
     mode: Mode,
     pitch_enabled: bool,
     pitch_semitones: f32,
+    subwoofer: f32,
     window_size_initialized: bool,
 }
 
@@ -124,15 +127,18 @@ impl eframe::App for LoomApp {
 
                 let volume = volume_control(ui, &mut self.volume);
 
-                let (surround, spatial_filter, spatial_stereo, spatial_surround) = ui
+                let (
+                    (surround_clicked, subwoofer_changed),
+                    spatial_filter,
+                    spatial_stereo,
+                    spatial_surround,
+                ) = ui
                     .horizontal(|ui| {
                         (
-                            mode_button(
+                            surround_control(
                                 ui,
-                                "3D SURROUND",
-                                ModeIcon::Cube,
-                                BRIGHT_ORANGE,
                                 self.mode == Mode::Surround3d,
+                                &mut self.subwoofer,
                             ),
                             mode_button(
                                 ui,
@@ -188,7 +194,7 @@ impl eframe::App for LoomApp {
                     })
                     .inner;
 
-                let new_mode = if surround.clicked() {
+                let new_mode = if surround_clicked {
                     toggle(self.mode, Mode::Surround3d)
                 } else if spatial_filter.clicked() {
                     toggle(self.mode, Mode::SpatialFilter)
@@ -209,6 +215,9 @@ impl eframe::App for LoomApp {
                 if new_mode != self.mode {
                     handle_respose(self.ipc_client.send(Request::SetMode(new_mode as u8)));
                     self.mode = new_mode;
+                }
+                if subwoofer_changed {
+                    handle_respose(self.ipc_client.send(Request::SetSubwoofer(self.subwoofer)));
                 }
                 if volume.changed() {
                     handle_respose(self.ipc_client.send(Request::SetVolume(self.volume)));
@@ -557,6 +566,60 @@ fn paint_pixel_icon(
     }
 }
 
+fn surround_control(ui: &mut egui::Ui, selected: bool, subwoofer: &mut f32) -> (bool, bool) {
+    use std::f32::consts::{FRAC_PI_2, PI};
+
+    const HALF_ARC: f32 = PI * 0.75;
+    let (rect, response) = ui.allocate_exact_size(CARD_SIZE, egui::Sense::click_and_drag());
+    let response = response.on_hover_cursor(egui::CursorIcon::PointingHand);
+    let center = egui::pos2(rect.center().x, rect.top() + 35.0);
+    let pointer = response.interact_pointer_pos();
+    let pointer_radius = pointer.map_or(0.0, |position| position.distance(center));
+    let mode_clicked = response.clicked() && (!selected || pointer_radius < 16.0);
+    let mut subwoofer_changed = false;
+
+    if selected
+        && pointer_radius >= 16.0
+        && (response.clicked() || response.dragged())
+        && let Some(pointer) = pointer
+    {
+        let value = dial_position(pointer - center);
+        subwoofer_changed = value != *subwoofer;
+        *subwoofer = value;
+    }
+
+    let marker_angle = subwoofer.clamp(0.0, 1.0) * HALF_ARC * 2.0 - FRAC_PI_2 - HALF_ARC;
+    let color = if selected || response.hovered() {
+        BRIGHT_ORANGE
+    } else {
+        LIGHT3
+    };
+    paint_pitch_wheel(ui.painter(), center, marker_angle, *subwoofer, false, color);
+    paint_pixel_icon(ui.painter(), center, ModeIcon::Cube.pattern(), color);
+    ui.painter().text(
+        egui::pos2(rect.center().x, rect.bottom() - 14.0),
+        egui::Align2::CENTER_CENTER,
+        "3D SURROUND",
+        egui::FontId::new(9.0, egui::FontFamily::Monospace),
+        if selected { LIGHT0 } else { LIGHT1 },
+    );
+
+    (mode_clicked, subwoofer_changed)
+}
+
+fn dial_position(direction: egui::Vec2) -> f32 {
+    use std::f32::consts::{FRAC_PI_2, PI};
+
+    const HALF_ARC: f32 = PI * 0.75;
+    let mut angle = direction.y.atan2(direction.x) + FRAC_PI_2;
+    if angle > PI {
+        angle -= 2.0 * PI;
+    } else if angle < -PI {
+        angle += 2.0 * PI;
+    }
+    (angle.clamp(-HALF_ARC, HALF_ARC) / HALF_ARC + 1.0) * 0.5
+}
+
 fn pitch_control(ui: &mut egui::Ui, enabled: &mut bool, semitones: &mut f32) -> egui::Response {
     use std::f32::consts::{FRAC_PI_2, PI};
 
@@ -589,13 +652,15 @@ fn pitch_control(ui: &mut egui::Ui, enabled: &mut bool, semitones: &mut f32) -> 
     let marker_offset = semitones.clamp(-12.0, 12.0) / 12.0 * HALF_ARC;
     let marker_angle = marker_offset - FRAC_PI_2;
     let gradient_position = (semitones.clamp(-12.0, 12.0) + 12.0) / 24.0;
-    paint_pitch_wheel(
+    let marker_color = paint_pitch_wheel(
         ui.painter(),
         center,
         marker_angle,
         gradient_position,
         *enabled || response.hovered(),
+        LIGHT3,
     );
+    paint_pitch_arrows(ui.painter(), center, marker_color);
     let label = if *enabled {
         format!("PITCH {:+.1}", *semitones)
     } else {
@@ -612,16 +677,7 @@ fn pitch_control(ui: &mut egui::Ui, enabled: &mut bool, semitones: &mut f32) -> 
 }
 
 fn pitch_from_direction(direction: egui::Vec2) -> f32 {
-    use std::f32::consts::{FRAC_PI_2, PI};
-
-    const HALF_ARC: f32 = PI * 0.75;
-    let mut angle = direction.y.atan2(direction.x) + FRAC_PI_2;
-    if angle > PI {
-        angle -= 2.0 * PI;
-    } else if angle < -PI {
-        angle += 2.0 * PI;
-    }
-    let semitones = angle.clamp(-HALF_ARC, HALF_ARC) / HALF_ARC * 12.0;
+    let semitones = dial_position(direction) * 24.0 - 12.0;
     if semitones.abs() <= 0.25 {
         0.0
     } else {
@@ -635,7 +691,8 @@ fn paint_pitch_wheel(
     marker_angle: f32,
     gradient_position: f32,
     show_gradient: bool,
-) {
+    plain_color: egui::Color32,
+) -> egui::Color32 {
     use std::f32::consts::{FRAC_PI_2, PI};
 
     const ARC_RADIUS: f32 = 25.0;
@@ -666,7 +723,7 @@ fn paint_pitch_wheel(
         let color = if show_gradient {
             pitch_gradient(from_progress)
         } else {
-            LIGHT3
+            plain_color
         };
         painter.line_segment(
             [point(from_progress), point(to_progress)],
@@ -677,10 +734,10 @@ fn paint_pitch_wheel(
     let marker_color = if show_gradient {
         pitch_gradient(gradient_position)
     } else {
-        LIGHT3
+        plain_color
     };
     paint_pitch_handle(painter, center, marker_angle, marker_color);
-    paint_pitch_arrows(painter, center, marker_color);
+    marker_color
 }
 
 fn paint_pitch_handle(
