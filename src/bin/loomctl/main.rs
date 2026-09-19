@@ -18,6 +18,8 @@ fn print_usage() {
     println!(" Enables or disables pitch shifting");
     println!("pitch <float>");
     println!(" Sets the pitch");
+    println!("subwoofer <0-1>");
+    println!(" Sets the 3D Surround subwoofer position");
 }
 
 fn handle_response(response: std::io::Result<Response>) {
@@ -33,11 +35,13 @@ fn handle_response(response: std::io::Result<Response>) {
             mode,
             pitch_enabled,
             pitch,
+            subwoofer,
         }) => {
             println!("Volume:        {volume}");
             println!("Mode:          {mode}");
             println!("Pitch enabled: {pitch_enabled}");
             println!("Pitch:         {pitch}");
+            println!("Subwoofer:     {subwoofer}");
         }
         Err(error) => {
             eprintln!("Failed to communicate with loomd: {error}");
@@ -91,6 +95,14 @@ fn main() {
                     handle_response(ipc_client.send(Request::SetPitch(pitch)));
                 } else {
                     eprintln!("Please provide a float for pitch");
+                }
+            }
+            "subwoofer" => {
+                if let Some(subwoofer) = args.next() {
+                    let subwoofer = subwoofer.parse().expect("Please provide a float from 0-1");
+                    handle_response(ipc_client.send(Request::SetSubwoofer(subwoofer)));
+                } else {
+                    eprintln!("Please provide a float from 0-1");
                 }
             }
             "get_state" => {

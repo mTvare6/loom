@@ -1,6 +1,6 @@
 # loom
 
-A plug and play real-time audio spatialiser for Linux.
+A plug and play real-time audio enhancer for Linux which makes anything sound instantly better.
 
 ### Libraries
 
@@ -24,6 +24,8 @@ cargo run --bin loomctl --release -- pitch_enabled true
 ```sh
 ./res/install.sh
 ```
+
+This installs the systemd service and starts the daemon. Start the the GUI with `loom` to play around with the settings.
 
 ### Roadmap
 
