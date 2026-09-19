@@ -10,27 +10,43 @@ use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 // and a two-state solution is neccesary.
 #[derive(Serialize, Deserialize)]
 pub struct AudioState {
+    #[serde(with = "atomic_f32")]
     volume: AtomicU32,
     mode: AtomicU8,
     pitch_enabled: AtomicBool,
+    #[serde(with = "atomic_f32")]
     pitch_semitones: AtomicU32,
-    #[serde(default = "default_subwoofer")]
+    #[serde(with = "atomic_f32")]
     subwoofer: AtomicU32,
 }
 
-// TODO: Freeze the API at some point to remove this
-fn default_subwoofer() -> AtomicU32 {
-    AtomicU32::new(1.0_f32.to_bits())
+mod atomic_f32 {
+    use serde::{Deserialize, Deserializer, Serializer};
+    use std::sync::atomic::{AtomicU32, Ordering};
+
+    pub fn serialize<S>(value: &AtomicU32, serializer: S) -> Result<S::Ok, S::Error>
+    where
+        S: Serializer,
+    {
+        serializer.serialize_f32(f32::from_bits(value.load(Ordering::Relaxed)))
+    }
+
+    pub fn deserialize<'de, D>(deserializer: D) -> Result<AtomicU32, D::Error>
+    where
+        D: Deserializer<'de>,
+    {
+        Ok(AtomicU32::new(f32::deserialize(deserializer)?.to_bits()))
+    }
 }
 
 impl AudioState {
-    pub fn new(initial_volume: f32) -> Self {
+    pub fn new() -> Self {
         Self {
-            volume: AtomicU32::new(initial_volume.to_bits()),
-            mode: AtomicU8::new(Mode::SurroundSound as u8),
+            volume: AtomicU32::new(1.0_f32.to_bits()),
+            mode: AtomicU8::new(Mode::default() as u8),
             pitch_enabled: AtomicBool::new(false),
             pitch_semitones: AtomicU32::new(0.0_f32.to_bits()),
-            subwoofer: default_subwoofer(),
+            subwoofer: AtomicU32::new(1.0_f32.to_bits()),
         }
     }
 

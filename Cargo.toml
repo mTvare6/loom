@@ -14,7 +14,7 @@ eframe = "0.33.3"
 egui = "0.33.3"
 tracing-subscriber = "0.3.23"
 tracing = "0.1.44"
-serde_json = "1.0"
+toml = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 directories = "6.0.0"
 palette = { version = "0.7.7", default-features = false, features = ["std"] }

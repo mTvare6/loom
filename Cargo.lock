@@ -2992,8 +2992,8 @@ dependencies = [
  "saq-ipc",
  "saq-pipewire",
  "serde",
- "serde_json",
  "signal-hook",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]

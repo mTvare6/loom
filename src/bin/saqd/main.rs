@@ -7,7 +7,7 @@ use saq_ipc::IpcServer;
 use signal_hook::consts::{SIGINT, SIGTERM};
 use signal_hook::flag;
 use state::AudioState;
-use std::fs::{self, File};
+use std::fs;
 use std::io;
 use std::path::PathBuf;
 use std::sync::{
@@ -22,9 +22,7 @@ struct AudioStateStore {
 }
 
 impl AudioStateStore {
-    // TODO: Rewrite it to toml and have the values be human-readable
-    // Currently AtomicU32 format is used for volume and semitones
-    const STATE_FILE_NAME: &str = "state.json";
+    const STATE_FILE_NAME: &str = "state.toml";
 
     fn new() -> Self {
         let path = ProjectDirs::from("com", "epestr", "saq")
@@ -34,23 +32,24 @@ impl AudioStateStore {
 
     fn load(&self) -> AudioState {
         let Some(path) = &self.path else {
-            return AudioState::new(1.0);
+            return AudioState::new();
         };
         if !path.exists() {
-            return AudioState::new(1.0);
+            return AudioState::new();
         }
 
-        match File::open(path)
-            .map_err(serde_json::Error::io)
-            .and_then(serde_json::from_reader::<_, AudioState>)
-        {
+        let state = || -> Result<AudioState, Box<dyn std::error::Error>> {
+            let contents = fs::read_to_string(path)?;
+            Ok(toml::from_str(&contents)?)
+        };
+        match state() {
             Ok(state) => state,
             Err(error) => {
                 warn!(
                     "Could not load audio state from {}: {error}",
                     path.display()
                 );
-                AudioState::new(1.0)
+                AudioState::new()
             }
         }
     }
@@ -66,10 +65,8 @@ impl AudioStateStore {
             };
             fs::create_dir_all(parent)?;
 
-            let temporary = path.with_extension("json.tmp");
-            let file = File::create(&temporary)?;
-
-            serde_json::to_writer_pretty(file, state)?;
+            let temporary = path.with_extension("toml.tmp");
+            fs::write(&temporary, toml::to_string_pretty(state)?)?;
             fs::rename(temporary, path)?;
 
             Ok(())
