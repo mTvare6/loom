@@ -1,12 +1,11 @@
 // SPDX-License-Identifier: MPL-2.0
 
-// Proceed with caution when trying to understand the code
-// File was completely generated in parts
 use eframe::egui;
 use loom_dsp::Mode;
-use loom_ipc::{IpcClient, Request, Response};
+use loom_ipc::{Event, IpcClient, Request, Response};
 use palette::{Clamp, FromColor, Mix, Oklab, Srgb};
 use std::path::Path;
+use std::time::Duration;
 
 const DARK0_HARD: egui::Color32 = egui::Color32::from_rgb(29, 32, 33);
 const DARK0: egui::Color32 = egui::Color32::from_rgb(40, 40, 40);
@@ -36,7 +35,7 @@ pub fn run_gui(socket: impl AsRef<Path>) -> eframe::Result<()> {
     };
 
     let state = ipc_client
-        .send(loom_ipc::Request::GetState)
+        .send(Request::GetState)
         .expect("Failed to get state");
 
     let (volume, mode, pitch_enabled, pitch_semitones, subwoofer) = match state {
@@ -75,8 +74,8 @@ pub fn run_gui(socket: impl AsRef<Path>) -> eframe::Result<()> {
     )
 }
 
-fn handle_respose(respose: std::io::Result<Response>) {
-    match respose {
+fn handle_response(response: std::io::Result<Response>) {
+    match response {
         Err(err) => {
             eprintln!("Loom daemon error: {}", err)
         }
@@ -112,12 +111,38 @@ struct LoomApp {
     window_size_initialized: bool,
 }
 
+impl LoomApp {
+    // poll for events
+    fn poll_ipc_events(&mut self, ctx: &egui::Context) {
+        if let Ok(event) = self.ipc_client.try_recv_event(Duration::from_millis(1)) {
+            match event {
+                Event::StateUpdated {
+                    volume,
+                    mode,
+                    pitch_enabled,
+                    pitch,
+                    subwoofer,
+                } => {
+                    self.volume = volume;
+                    self.mode = Mode::from_u8(mode);
+                    self.pitch_enabled = pitch_enabled;
+                    self.pitch_semitones = pitch;
+                    self.subwoofer = subwoofer;
+                    ctx.request_repaint();
+                }
+            }
+        }
+    }
+}
+
 impl eframe::App for LoomApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         if !self.window_size_initialized {
             ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(WINDOW_SIZE));
             self.window_size_initialized = true;
         }
+
+        self.poll_ipc_events(ctx);
 
         egui::CentralPanel::default().show(ctx, |ui| {
             ui.painter().rect_filled(ui.max_rect(), 0, DARK0);
@@ -213,28 +238,29 @@ impl eframe::App for LoomApp {
                 };
 
                 if new_mode != self.mode {
-                    handle_respose(self.ipc_client.send(Request::SetMode(new_mode as u8)));
+                    handle_response(self.ipc_client.send(Request::SetMode(new_mode as u8)));
                     self.mode = new_mode;
                 }
                 if subwoofer_changed {
-                    handle_respose(self.ipc_client.send(Request::SetSubwoofer(self.subwoofer)));
+                    handle_response(self.ipc_client.send(Request::SetSubwoofer(self.subwoofer)));
                 }
                 if volume.changed() {
-                    handle_respose(self.ipc_client.send(Request::SetVolume(self.volume)));
+                    handle_response(self.ipc_client.send(Request::SetVolume(self.volume)));
                 }
                 if pitch.changed() {
-                    handle_respose(
+                    handle_response(
                         self.ipc_client
                             .send(Request::SetPitchEnabled(self.pitch_enabled)),
                     );
-                    handle_respose(
+                    handle_response(
                         self.ipc_client
                             .send(Request::SetPitch(self.pitch_semitones)),
                     );
                 }
             });
         });
-        ctx.request_repaint();
+
+        ctx.request_repaint_after(Duration::from_millis(50));
     }
 }
 
