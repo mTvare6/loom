@@ -1,0 +1,27 @@
+pkgbase = saq-git
+	pkgdesc = A real-time easy to use audio enhancer for Linux
+	pkgver = 0.1.0.r35.gec31bbe
+	pkgrel = 1
+	url = https://github.com/mTvare6/saq
+	arch = x86_64
+	license = MPL-2.0
+	makedepends = cargo
+	makedepends = git
+	makedepends = pkgconf
+	depends = gcc-libs
+	depends = glibc
+	depends = libglvnd
+	depends = libx11
+	depends = libxcursor
+	depends = libxi
+	depends = libxkbcommon
+	depends = libxrandr
+	depends = pipewire
+	depends = wayland
+	provides = saq=0.1.0.r35.gec31bbe
+	conflicts = saq
+	options = !lto
+	source = saq::git+https://github.com/mTvare6/saq.git
+	sha256sums = SKIP
+
+pkgname = saq-git
