@@ -95,7 +95,7 @@ impl AudioThread {
         let (shutdown_tx, shutdown_rx) = loom_pipewire::shutdown_channel();
         let thread = std::thread::spawn(move || {
             let result = loom_pipewire::run_audio_engine(state, shutdown_rx);
-            // mainloop stopping without signal handling likely indicates 
+            // mainloop stopping without signal handling likely indicates
             // PipeWire crashing. Handling that separately so init systems can
             // restart (systemd has an option at least)
             if !stop_ipc.load(Ordering::Acquire) {
@@ -157,8 +157,8 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let ipc_server = IpcServer::new(loom_ipc::socket_path()?);
     let state = shared_state.clone();
 
-    let ipc_result = ipc_server
-        .run_until(Arc::new(move |request| state.handle_query(request)), || {
+    let ipc_result =
+        ipc_server.run_until(Arc::new(move |request| state.handle_query(request)), || {
             // Stops with signals and audio-thread failing
             stop_ipc.load(Ordering::Acquire)
         });

@@ -39,3 +39,19 @@ pub enum Response {
     Ok,
     Error,
 }
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub enum Event {
+    StateUpdated {
+        volume: f32,
+        mode: u8,
+        pitch_enabled: bool,
+        pitch: f32,
+    },
+}
+
+#[derive(Clone, Copy, Serialize, Deserialize)]
+pub enum Frame {
+    Event(Event),
+    Response(Response),
+}
