@@ -3,25 +3,52 @@ use std::io::ErrorKind;
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
 use tracing::{error, info};
 
-use crate::{Request, Response};
+use crate::{Event, Frame, Request, Response};
+
+pub struct EventNotifier {
+    inner: Mutex<(u64, Option<Event>)>,
+}
+
+impl EventNotifier {
+    pub fn new() -> Self {
+        Self {
+            inner: Mutex::new((0, None)),
+        }
+    }
+
+    pub fn notify(&self, event: Event) {
+        let mut guard = self.inner.lock().unwrap();
+        guard.0 += 1;
+        guard.1 = Some(event);
+    }
+}
 
 pub struct IpcServer {
     socket: PathBuf,
+    event_notifier: Arc<EventNotifier>,
 }
 
 impl IpcServer {
     pub fn new<P: AsRef<Path>>(socket_path: P) -> Self {
         Self {
             socket: socket_path.as_ref().to_path_buf(),
+            event_notifier: Arc::new(EventNotifier::new()),
         }
     }
 
-    pub fn run_until<F: Fn(Request) -> Response + Send + Sync + 'static, S: Fn() -> bool>(
+    pub fn notifier(&self) -> Arc<EventNotifier> {
+        self.event_notifier.clone()
+    }
+
+    pub fn run_until<
+        F: Fn(Request) -> (Response, Option<Event>) + Send + Sync + 'static,
+        S: Fn() -> bool,
+    >(
         &self,
         f: Arc<F>,
         should_stop: S,
@@ -37,10 +64,6 @@ impl IpcServer {
         }
 
         let listener = UnixListener::bind(&self.socket)?;
-
-        // Generally it blocks the thread waiting for another
-        // Having it be nonblocking allows should_stop to be run exiting
-        // run_until and allowing audio thread to be dropped and exit gracefully
         listener.set_nonblocking(true)?;
 
         info!("IPC Server listening on {:?}", self.socket);
@@ -49,14 +72,14 @@ impl IpcServer {
             match listener.accept() {
                 Ok((stream, _address)) => {
                     let handler = f.clone();
-                    // Each client is handled in it's thread
+                    let event_notifier = self.event_notifier.clone();
+
                     thread::spawn(move || {
-                        if let Err(error) = handle_client(stream, handler) {
+                        if let Err(error) = handle_client(stream, event_notifier, handler) {
                             error!("IPC client error: {}", error);
                         }
                     });
                 }
-                // Would've been blocking at this point but explicitly disabled
                 Err(error) if error.kind() == ErrorKind::WouldBlock => {
                     thread::sleep(Duration::from_millis(20));
                 }
@@ -74,31 +97,63 @@ impl Drop for IpcServer {
     }
 }
 
-fn handle_client<F: Fn(Request) -> Response + Send + Sync + 'static>(
+fn handle_client<F: Fn(Request) -> (Response, Option<Event>) + Send + Sync + 'static>(
     mut stream: UnixStream,
+    notifier: Arc<EventNotifier>,
     handler: Arc<F>,
 ) -> std::io::Result<()> {
+    stream.set_read_timeout(Some(Duration::from_millis(20)))?;
+
     let mut reader = BufReader::new(stream.try_clone()?);
     let mut line = String::new();
+    let mut last_seen_version = 0;
 
     loop {
-        line.clear();
-        let bytes_read = reader.read_line(&mut line)?;
-
-        if bytes_read == 0 {
-            return Ok(());
-        }
-
-        let response = match serde_json::from_str::<Request>(&line) {
-            Ok(request) => handler(request),
-            Err(error) => {
-                error!("IPC parse error: {}", error);
-                Response::Error
-            }
+        let (current_version, maybe_event) = {
+            let guard = notifier.inner.lock().unwrap();
+            (guard.0, guard.1.clone())
         };
 
-        let mut response_str = serde_json::to_string(&response).map_err(std::io::Error::other)?;
-        response_str.push('\n');
-        stream.write_all(response_str.as_bytes())?;
+        if current_version > last_seen_version {
+            last_seen_version = current_version;
+
+            if let Some(event) = maybe_event {
+                let mut payload =
+                    serde_json::to_string(&Frame::Event(event)).map_err(std::io::Error::other)?;
+                payload.push('\n');
+                if stream.write_all(payload.as_bytes()).is_err() {
+                    return Ok(());
+                }
+            }
+        }
+
+        match reader.read_line(&mut line) {
+            Ok(0) => return Ok(()),
+            Ok(_) => {
+                let response = match serde_json::from_str::<Request>(&line) {
+                    Ok(request) => {
+                        let (response, maybe_event) = handler(request);
+                        if let Some(event) = maybe_event {
+                            notifier.notify(event);
+                        }
+
+                        response
+                    }
+                    Err(error) => {
+                        error!("IPC parse error: {}", error);
+                        Response::Error
+                    }
+                };
+
+                line.clear();
+
+                let mut response_str = serde_json::to_string(&Frame::Response(response))
+                    .map_err(std::io::Error::other)?;
+                response_str.push('\n');
+                stream.write_all(response_str.as_bytes())?;
+            }
+            Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {}
+            Err(e) => return Err(e),
+        }
     }
 }
