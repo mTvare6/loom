@@ -117,4 +117,6 @@ fn main() {
             }
         }
     }
+
+    drop(ipc_client);
 }

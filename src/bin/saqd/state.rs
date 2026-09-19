@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use saq_dsp::Mode;
-use saq_ipc::{Request, Response};
+use saq_ipc::{Event, Request, Response};
 use serde::{Deserialize, Serialize};
 use std::sync::atomic::{AtomicBool, AtomicU8, AtomicU32, Ordering};
 
@@ -97,39 +97,52 @@ impl AudioState {
         }
     }
 
-    pub fn handle_query(&self, request: Request) -> Response {
+    pub fn handle_query(&self, request: Request) -> (Response, Option<Event>) {
         match request {
             Request::SetVolume(volume) => {
                 self.set_volume(volume);
-                Response::Ok
+                (Response::Ok, Some(self.updated_event()))
             }
             Request::SetMode(mode) => {
                 self.set_mode(Mode::from_u8(mode));
-                Response::Ok
+                (Response::Ok, Some(self.updated_event()))
             }
-            Request::GetState => Response::State {
-                volume: self.volume(),
-                mode: self.mode() as u8,
-                pitch_enabled: self.pitch_enabled(),
-                pitch: self.pitch_semitones(),
-                subwoofer: self.subwoofer(),
-            },
+            Request::GetState => (
+                Response::State {
+                    volume: self.volume(),
+                    mode: self.mode() as u8,
+                    pitch_enabled: self.pitch_enabled(),
+                    pitch: self.pitch_semitones(),
+                    subwoofer: self.subwoofer(),
+                },
+                None,
+            ),
             Request::SetPitchEnabled(pitch_enabled) => {
                 self.set_pitch_enabled(pitch_enabled);
-                Response::Ok
+                (Response::Ok, Some(self.updated_event()))
             }
             Request::SetPitch(pitch) => {
                 if self.pitch_enabled() {
                     self.set_pitch_semitones(pitch);
-                    Response::Ok
+                    (Response::Ok, Some(self.updated_event()))
                 } else {
-                    Response::Error
+                    (Response::Error, None)
                 }
             }
             Request::SetSubwoofer(value) => {
                 self.set_subwoofer(value);
-                Response::Ok
+                (Response::Ok, Some(self.updated_event()))
             }
+        }
+    }
+
+    fn updated_event(&self) -> Event {
+        Event::StateUpdated {
+            volume: self.volume(),
+            mode: self.mode() as u8,
+            pitch_enabled: self.pitch_enabled(),
+            pitch: self.pitch_semitones(),
+            subwoofer: self.subwoofer(),
         }
     }
 }
