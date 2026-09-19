@@ -1993,8 +1993,8 @@ dependencies = [
  "loom-pipewire",
  "palette",
  "serde",
- "serde_json",
  "signal-hook",
+ "toml",
  "tracing",
  "tracing-subscriber",
 ]

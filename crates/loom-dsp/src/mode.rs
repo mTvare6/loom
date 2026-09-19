@@ -3,9 +3,9 @@
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Mode {
-    #[default]
     Off = 0,
     SpatialFilter = 1,
+    #[default]
     Surround3d = 2,
     Ambience = 3,
     Fidelity = 4,
