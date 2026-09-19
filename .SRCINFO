@@ -1,0 +1,27 @@
+pkgbase = loom-git
+	pkgdesc = Plug and play real-time audio enhancer which makes anything sound instantly better
+	pkgver = 0.1.0.r35.gec31bbe
+	pkgrel = 1
+	url = https://github.com/mTvare6/loom
+	arch = x86_64
+	license = MPL-2.0
+	makedepends = cargo
+	makedepends = git
+	makedepends = pkgconf
+	depends = gcc-libs
+	depends = glibc
+	depends = libglvnd
+	depends = libx11
+	depends = libxcursor
+	depends = libxi
+	depends = libxkbcommon
+	depends = libxrandr
+	depends = pipewire
+	depends = wayland
+	provides = loom=0.1.0.r35.gec31bbe
+	conflicts = loom
+	options = !lto
+	source = loom::git+https://github.com/mTvare6/loom.git
+	sha256sums = SKIP
+
+pkgname = loom-git
