@@ -54,7 +54,7 @@ pub enum Event {
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
-pub enum Frame {
+pub enum ServerMsg {
     Event(Event),
     Response(Response),
 }
