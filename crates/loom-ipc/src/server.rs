@@ -1,9 +1,7 @@
-use std::collections::HashMap;
 use std::fs;
 use std::io::{self, BufRead, BufReader, ErrorKind, Write};
 use std::os::unix::net::{UnixListener, UnixStream};
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 use std::thread;
 use std::time::Duration;
@@ -14,58 +12,58 @@ use tracing::{error, info};
 
 use crate::{Event, Request, Response, ServerMsg};
 
-type ClientId = u64;
 const SOCKET: Token = Token(0);
 const EVENT_TOKEN: Token = Token(1);
 
+struct Inner {
+    version: u64,
+    event: Option<Event>,
+    wakers: Vec<Arc<Waker>>,
+}
+
 pub struct EventNotifier {
-    inner: Mutex<(u64, Option<Event>)>,
-    wakers: Mutex<HashMap<ClientId, Arc<Waker>>>,
-    next_id: AtomicU64,
+    inner: Mutex<Inner>,
 }
 
 impl EventNotifier {
     fn new() -> Self {
         Self {
-            inner: Mutex::new((0, None)),
-            wakers: Mutex::new(HashMap::new()),
-            next_id: AtomicU64::new(0),
+            inner: Mutex::new(Inner {
+                version: 0,
+                event: None,
+                wakers: Vec::new(),
+            }),
         }
     }
 
-    fn register(&self, waker: Arc<Waker>) -> ClientId {
-        let id = self.next_id.fetch_add(1, Ordering::Relaxed);
-        self.wakers.lock().unwrap().insert(id, waker);
-        id
+    fn register(&self, waker: Arc<Waker>) -> (u64, Option<Event>) {
+        let mut inner = self.inner.lock().unwrap();
+        let snapshot = (inner.version, inner.event);
+        inner.wakers.push(waker);
+        snapshot
     }
 
-    fn unregister(&self, id: ClientId) {
-        self.wakers.lock().unwrap().remove(&id);
+    fn unregister(&self, waker: &Arc<Waker>) {
+        let mut inner = self.inner.lock().unwrap();
+        inner.wakers.retain(|w| !Arc::ptr_eq(w, waker));
     }
 
-    pub fn publish_from<F: Fn() -> (Response, Option<Event>)>(&self, f: F) -> Response {
-        let (result, published) = {
-            let mut state = self.inner.lock().unwrap();
-            let (r, maybe_event) = f();
-            if let Some(event) = maybe_event {
-                state.0 += 1;
-                state.1 = Some(event);
-            }
-            (r, maybe_event.is_some())
-        };
-
-        if published {
-            for waker in self.wakers.lock().unwrap().values() {
+    pub fn publish_from<T>(&self, f: impl FnOnce() -> (T, Option<Event>)) -> T {
+        let mut inner = self.inner.lock().unwrap();
+        let (result, maybe_event) = f();
+        if let Some(event) = maybe_event {
+            inner.version += 1;
+            inner.event = Some(event);
+            for waker in &inner.wakers {
                 let _ = waker.wake();
             }
         }
-
         result
     }
 
     fn snapshot(&self) -> (u64, Option<Event>) {
-        let state = self.inner.lock().unwrap();
-        (state.0, state.1)
+        let inner = self.inner.lock().unwrap();
+        (inner.version, inner.event)
     }
 }
 
@@ -154,32 +152,9 @@ fn flush(stream: &mut MioUnixStream, out_buf: &mut Vec<u8>) -> io::Result<()> {
                 out_buf.drain(0..n);
             }
             Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+            Err(e) if e.kind() == ErrorKind::WouldBlock => return Ok(()),
             Err(e) => return Err(e),
         }
-    }
-    Ok(())
-}
-
-fn flush_and_adjust_interest(
-    poll: &Poll,
-    reader: &mut BufReader<MioUnixStream>,
-    out_buf: &mut Vec<u8>,
-    interest: &mut Interest,
-) -> io::Result<()> {
-    match flush(reader.get_mut(), out_buf) {
-        Ok(()) => {}
-        Err(e) if e.kind() == ErrorKind::WouldBlock => {}
-        Err(e) => return Err(e),
-    }
-    let new_interest = if out_buf.is_empty() {
-        Interest::READABLE
-    } else {
-        Interest::READABLE | Interest::WRITABLE
-    };
-    if new_interest != *interest {
-        poll.registry()
-            .reregister(reader.get_mut(), SOCKET, new_interest)?;
-        *interest = new_interest;
     }
     Ok(())
 }
@@ -192,27 +167,25 @@ fn handle_client<F: Fn(Request) -> (Response, Option<Event>) + Send + Sync + 'st
     let mut mio_stream = MioUnixStream::from_std(stream);
 
     let mut poll = Poll::new()?;
-    let mut interest = Interest::READABLE;
-    poll.registry()
-        .register(&mut mio_stream, SOCKET, interest)?;
+    poll.registry().register(
+        &mut mio_stream,
+        SOCKET,
+        Interest::READABLE | Interest::WRITABLE,
+    )?;
 
     let waker = Arc::new(Waker::new(poll.registry(), EVENT_TOKEN)?);
-    let client_id = notifier.register(waker);
+    let (mut last_seen_version, initial_event) = notifier.register(waker.clone());
 
     let mut reader = BufReader::new(mio_stream);
     let mut in_line = String::new();
     let mut out_buf: Vec<u8> = Vec::new();
-    let mut last_seen_version = 0u64;
     let mut events = Events::with_capacity(4);
-    let (version, event) = notifier.snapshot();
-    if version > last_seen_version {
-        last_seen_version = version;
-        if let Some(event) = event {
-            queue_server_msg(&mut out_buf, &ServerMsg::Event(event))?;
-        }
+
+    if let Some(event) = initial_event {
+        queue_server_msg(&mut out_buf, &ServerMsg::Event(event))?;
     }
 
-    let result = match flush_and_adjust_interest(&poll, &mut reader, &mut out_buf, &mut interest) {
+    let result = match flush(reader.get_mut(), &mut out_buf) {
         Err(e) => Err(e),
         Ok(()) => 'outer: loop {
             if let Err(e) = poll.poll(&mut events, None) {
@@ -269,9 +242,7 @@ fn handle_client<F: Fn(Request) -> (Response, Option<Event>) + Send + Sync + 'st
                 }
             }
 
-            if let Err(e) =
-                flush_and_adjust_interest(&poll, &mut reader, &mut out_buf, &mut interest)
-            {
+            if let Err(e) = flush(reader.get_mut(), &mut out_buf) {
                 break Err(e);
             }
 
@@ -281,6 +252,6 @@ fn handle_client<F: Fn(Request) -> (Response, Option<Event>) + Send + Sync + 'st
         },
     };
 
-    notifier.unregister(client_id);
+    notifier.unregister(&waker);
     result
 }
