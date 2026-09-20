@@ -24,6 +24,7 @@ impl IpcClient {
     pub fn send(&mut self, request: Request) -> io::Result<Response> {
         let mut msg = serde_json::to_string(&request)?;
         msg.push('\n');
+
         self.stream.get_ref().write_all(msg.as_bytes())?;
         self.stream.get_ref().flush()?;
 
