@@ -1,4 +1,4 @@
-use saq_dsp::Mode;
+use saq_dsp::{EqPreset, Mode};
 use saq_ipc::{IpcClient, Request, Response};
 
 fn print_usage() {
@@ -20,6 +20,8 @@ fn print_usage() {
     println!(" Sets the pitch");
     println!("subwoofer <0-1>");
     println!(" Sets the 3D Surround subwoofer position");
+    println!("eq <off|dialogue>");
+    println!(" Selects an equalizer preset");
 }
 
 fn handle_response(response: std::io::Result<Response>) {
@@ -36,12 +38,15 @@ fn handle_response(response: std::io::Result<Response>) {
             pitch_enabled,
             pitch,
             subwoofer,
+            eq_preset,
+            ..
         }) => {
             println!("Volume:        {volume}");
             println!("Mode:          {mode}");
             println!("Pitch enabled: {pitch_enabled}");
             println!("Pitch:         {pitch}");
             println!("Subwoofer:     {subwoofer}");
+            println!("EQ:            {}", EqPreset::from_u8(eq_preset).label());
         }
         Err(error) => {
             eprintln!("Failed to communicate with saqd: {error}");
@@ -103,6 +108,21 @@ fn main() {
                     handle_response(ipc_client.send(Request::SetSubwoofer(subwoofer)));
                 } else {
                     eprintln!("Please provide a float from 0-1");
+                }
+            }
+            "eq" => {
+                if let Some(preset) = args.next() {
+                    let preset = match preset.to_ascii_lowercase().as_str() {
+                        "off" => EqPreset::Off,
+                        "dialogue" => EqPreset::Dialogue,
+                        _ => {
+                            eprintln!("Please provide a valid preset");
+                            return;
+                        }
+                    };
+                    handle_response(ipc_client.send(Request::SetEqPreset(preset as u8)));
+                } else {
+                    eprintln!("Please provide off or dialogue");
                 }
             }
             "get_state" => {

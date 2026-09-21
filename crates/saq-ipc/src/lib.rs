@@ -12,14 +12,14 @@ use std::{
 
 pub fn socket_path() -> io::Result<PathBuf> {
     let directories = ProjectDirs::from("com", "epestr", "saq")
-        .ok_or_else(|| Error::new(ErrorKind::NotFound, "home directory is unavailable"))?;
+        .ok_or_else(|| Error::new(ErrorKind::NotFound, "Home directory is unavailable"))?;
     let runtime_directory = directories
         .runtime_dir()
         .ok_or_else(|| Error::new(ErrorKind::NotFound, "User runtime directory found"))?;
     Ok(runtime_directory.join("saq.sock"))
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum Request {
     GetState,
     SetVolume(f32),
@@ -27,6 +27,14 @@ pub enum Request {
     SetPitchEnabled(bool),
     SetPitch(f32),
     SetSubwoofer(f32),
+    SetEqPreset(u8),
+    SetEqProfile {
+        preset: u8,
+        base_preset: u8,
+        point_count: u8,
+        frequencies_hz: Vec<f32>,
+        gains_db: Vec<f32>,
+    },
 }
 
 #[derive(Clone, Serialize, Deserialize)]
@@ -37,12 +45,17 @@ pub enum Response {
         pitch_enabled: bool,
         pitch: f32,
         subwoofer: f32,
+        eq_preset: u8,
+        eq_base_preset: u8,
+        eq_point_count: u8,
+        eq_frequencies_hz: Vec<f32>,
+        eq_gains_db: Vec<f32>,
     },
     Ok,
     Error(String),
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum Event {
     StateUpdated {
         volume: f32,
@@ -50,6 +63,11 @@ pub enum Event {
         pitch_enabled: bool,
         pitch: f32,
         subwoofer: f32,
+        eq_preset: u8,
+        eq_base_preset: u8,
+        eq_point_count: u8,
+        eq_frequencies_hz: Vec<f32>,
+        eq_gains_db: Vec<f32>,
     },
 }
 

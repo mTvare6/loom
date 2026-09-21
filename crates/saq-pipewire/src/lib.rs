@@ -1,8 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use saq_dsp::{
-    RoomEngine, ClarityEngine, Mode, NightEngine, PitchEngine, SpatialFilterEngine,
-    SpatialStereoEngine, SpatialSurroundEngine, SurroundEngine,
+    RoomEngine, EqEngine, EqProfile, ClarityEngine, Mode, NightEngine, PitchEngine,
+    SAMPLE_RATE, SpatialFilterEngine, SpatialStereoEngine, SpatialSurroundEngine, SurroundEngine,
 };
 use pipewire as pw;
 use pw::{
@@ -28,6 +28,7 @@ pub trait AudioControls: Send + Sync + 'static {
     fn pitch_enabled(&self) -> bool;
     fn pitch_semitones(&self) -> f32;
     fn subwoofer(&self) -> f32;
+    fn eq_profile(&self) -> EqProfile;
 }
 
 pub struct ShutdownTransmitter(channel::Sender<()>);
@@ -54,11 +55,13 @@ struct Processor {
     room: Box<RoomEngine>,
     clarity: Box<ClarityEngine>,
     night: Box<NightEngine>,
+    eq: Box<EqEngine>,
     pitch: Box<PitchEngine>,
     pitch_was_enabled: bool,
     input_already_disconnected: bool,
     output_buffer_resets_left: u8,
     active_mode: Mode,
+    active_eq: EqProfile,
     state: Arc<dyn AudioControls>,
 }
 
@@ -71,7 +74,15 @@ impl Processor {
         self.room.reset();
         self.clarity.reset();
         self.night.reset();
+        self.eq.reset();
         self.pitch.reset();
+    }
+
+    fn switch_eq(&mut self, profile: EqProfile) {
+        if profile != self.active_eq {
+            self.eq.configure(profile);
+            self.active_eq = profile;
+        }
     }
 
     fn switch_mode(&mut self, mode: Mode) {
@@ -117,7 +128,7 @@ pub fn run_audio_engine(
     )?;
 
     // TODO: Generalize to 96k or 44.1k if input advertises that.
-    let mut spatial_filter = SpatialFilterEngine::new(48000.0);
+    let mut spatial_filter = SpatialFilterEngine::new(SAMPLE_RATE as f32);
     // TODO: Add controls and parametrise every filter.
     spatial_filter.update_params(1.0);
 
@@ -136,11 +147,13 @@ pub fn run_audio_engine(
         room: RoomEngine::new(),
         clarity: ClarityEngine::new(),
         night: NightEngine::new(),
+        eq: EqEngine::new(),
         pitch: PitchEngine::new(),
         pitch_was_enabled: false,
         input_already_disconnected: true,
         output_buffer_resets_left: 0,
         active_mode: Mode::Off,
+        active_eq: EqProfile::default(),
         state,
     };
 
@@ -153,7 +166,9 @@ pub fn run_audio_engine(
             let volume = processor.state.volume();
             let mode = processor.state.mode();
             let subwoofer = processor.state.subwoofer();
+            let eq_profile = processor.state.eq_profile();
             processor.switch_mode(mode);
+            processor.switch_eq(eq_profile);
 
             let [input_left, input_right, output_left, output_right] = &mut processor.ports;
             let buffers = unsafe {
@@ -210,6 +225,11 @@ pub fn run_audio_engine(
                     Mode::Clarity => processor.clarity.process(input_left[i], input_right[i]),
                     Mode::Night => processor.night.process(input_left[i], input_right[i]),
                 };
+
+                // FIXME: +db changes cause a lot of tearing when used improperly
+                // Gotta use a compressor or just have night kinda dynamic one
+                let (left, right) = processor.eq.process(left, right);
+
                 output_left[i] = left * volume;
                 output_right[i] = right * volume;
             }

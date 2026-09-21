@@ -1,7 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use eframe::egui;
-use saq_dsp::Mode;
+use saq_dsp::{EQ_BAND_COUNT, EQ_BAND_FREQUENCIES, EQ_MAX_POINTS, EqPreset, EqProfile, Mode};
 use saq_ipc::{Event, IpcClient, Request, Response};
 use palette::{Clamp, FromColor, Mix, Oklab, Srgb};
 use std::path::Path;
@@ -25,7 +25,8 @@ const LOGO_BLACK: egui::Color32 = egui::Color32::from_rgb(40, 24, 18);
 
 const CONTENT_WIDTH: f32 = 672.0;
 const CARD_SIZE: egui::Vec2 = egui::vec2(162.0, 88.0);
-const WINDOW_SIZE: egui::Vec2 = egui::vec2(708.0, 350.0);
+const WINDOW_SIZE: egui::Vec2 = egui::vec2(708.0, 580.0);
+const EQ_GRAPH_HEIGHT: f32 = 202.0;
 
 pub fn run_gui(socket: impl AsRef<Path>) -> eframe::Result<()> {
     let mut ipc_client = match IpcClient::new(socket) {
@@ -37,14 +38,41 @@ pub fn run_gui(socket: impl AsRef<Path>) -> eframe::Result<()> {
         .send(Request::GetState)
         .expect("Failed to get state");
 
-    let (volume, mode, pitch_enabled, pitch_semitones, subwoofer) = match state {
+    let (
+        volume,
+        mode,
+        pitch_enabled,
+        pitch_semitones,
+        subwoofer,
+        eq_preset,
+        eq_base_preset,
+        eq_point_count,
+        eq_frequencies_hz,
+        eq_gains_db,
+    ) = match state {
         Response::State {
             volume,
             mode,
             pitch_enabled,
             pitch,
             subwoofer,
-        } => (volume, Mode::from_u8(mode), pitch_enabled, pitch, subwoofer),
+            eq_preset,
+            eq_base_preset,
+            eq_point_count,
+            eq_frequencies_hz,
+            eq_gains_db,
+        } => (
+            volume,
+            Mode::from_u8(mode),
+            pitch_enabled,
+            pitch,
+            subwoofer,
+            EqPreset::from_u8(eq_preset),
+            EqPreset::from_u8(eq_base_preset),
+            eq_point_count,
+            array_from_vec(eq_frequencies_hz, EqProfile::default_frequencies()),
+            array_from_vec(eq_gains_db, [0.0; EQ_MAX_POINTS]),
+        ),
         _ => unreachable!(),
     };
 
@@ -67,6 +95,16 @@ pub fn run_gui(socket: impl AsRef<Path>) -> eframe::Result<()> {
                 pitch_enabled,
                 pitch_semitones,
                 subwoofer,
+                eq_preset,
+                eq_base_preset,
+                eq_point_count,
+                eq_frequencies_hz,
+                eq_gains_db,
+                vocals_response: EqPreset::Dialogue
+                    .response_db(&EQ_BAND_FREQUENCIES)
+                    .try_into()
+                    .expect("31 EQ response points"),
+                active_eq_handle: None,
                 window_size_initialized: false,
             }))
         }),
@@ -83,6 +121,13 @@ fn handle_response(response: std::io::Result<Response>) {
         }
         _ => {}
     }
+}
+
+fn array_from_vec<T: Copy, const N: usize>(values: Vec<T>, mut defaults: [T; N]) -> [T; N] {
+    for (target, value) in defaults.iter_mut().zip(values) {
+        *target = value;
+    }
+    defaults
 }
 
 fn configure_style(ctx: &egui::Context) {
@@ -110,6 +155,13 @@ struct SaqApp {
     pitch_enabled: bool,
     pitch_semitones: f32,
     subwoofer: f32,
+    eq_preset: EqPreset,
+    eq_base_preset: EqPreset,
+    eq_point_count: u8,
+    eq_frequencies_hz: [f32; EQ_MAX_POINTS],
+    eq_gains_db: [f32; EQ_MAX_POINTS],
+    vocals_response: [f32; EQ_BAND_COUNT],
+    active_eq_handle: Option<usize>,
     window_size_initialized: bool,
 }
 
@@ -124,12 +176,23 @@ impl SaqApp {
                     pitch_enabled,
                     pitch,
                     subwoofer,
+                    eq_preset,
+                    eq_base_preset,
+                    eq_point_count,
+                    eq_frequencies_hz,
+                    eq_gains_db,
                 } => {
                     self.volume = volume;
                     self.mode = Mode::from_u8(mode);
                     self.pitch_enabled = pitch_enabled;
                     self.pitch_semitones = pitch;
                     self.subwoofer = subwoofer;
+                    self.eq_preset = EqPreset::from_u8(eq_preset);
+                    self.eq_base_preset = EqPreset::from_u8(eq_base_preset);
+                    self.eq_point_count = eq_point_count;
+                    self.eq_frequencies_hz =
+                        array_from_vec(eq_frequencies_hz, EqProfile::default_frequencies());
+                    self.eq_gains_db = array_from_vec(eq_gains_db, [0.0; EQ_MAX_POINTS]);
                     ctx.request_repaint();
                 }
             }
@@ -153,6 +216,18 @@ impl eframe::App for SaqApp {
                 title_bar(ui);
 
                 let volume = volume_control(ui, &mut self.volume);
+                let eq_changed = eq_control(
+                    ui,
+                    EqControl {
+                        preset: &mut self.eq_preset,
+                        base_preset: &mut self.eq_base_preset,
+                        point_count: &mut self.eq_point_count,
+                        frequencies_hz: &mut self.eq_frequencies_hz,
+                        gains_db: &mut self.eq_gains_db,
+                        active_handle: &mut self.active_eq_handle,
+                    },
+                    &self.vocals_response,
+                );
 
                 let (
                     (surround_sound_clicked, subwoofer_changed),
@@ -249,6 +324,15 @@ impl eframe::App for SaqApp {
                 if volume.changed() {
                     handle_response(self.ipc_client.send(Request::SetVolume(self.volume)));
                 }
+                if eq_changed {
+                    handle_response(self.ipc_client.send(Request::SetEqProfile {
+                        preset: self.eq_preset as u8,
+                        base_preset: self.eq_base_preset as u8,
+                        point_count: self.eq_point_count,
+                        frequencies_hz: self.eq_frequencies_hz.to_vec(),
+                        gains_db: self.eq_gains_db.to_vec(),
+                    }));
+                }
                 if pitch.changed() {
                     handle_response(
                         self.ipc_client
@@ -263,6 +347,359 @@ impl eframe::App for SaqApp {
         });
 
         ctx.request_repaint_after(Duration::from_millis(50));
+    }
+}
+
+struct EqControl<'a> {
+    preset: &'a mut EqPreset,
+    base_preset: &'a mut EqPreset,
+    point_count: &'a mut u8,
+    frequencies_hz: &'a mut [f32; EQ_MAX_POINTS],
+    gains_db: &'a mut [f32; EQ_MAX_POINTS],
+    active_handle: &'a mut Option<usize>,
+}
+
+fn eq_control(
+    ui: &mut egui::Ui,
+    control: EqControl<'_>,
+    vocals_response: &[f32; EQ_BAND_COUNT],
+) -> bool {
+    let EqControl {
+        preset,
+        base_preset,
+        point_count,
+        frequencies_hz,
+        gains_db,
+        active_handle,
+    } = control;
+    let mut committed = false;
+    let previous_preset = *preset;
+    ui.horizontal(|ui| {
+        ui.add_space(12.0);
+        ui.label(
+            egui::RichText::new("EQUALIZER")
+                .font(egui::FontId::new(10.0, egui::FontFamily::Monospace))
+                .color(LIGHT3),
+        );
+        egui::ComboBox::from_id_salt("eq-preset")
+            .selected_text(preset.label())
+            .width(112.0)
+            .show_ui(ui, |ui| {
+                ui.selectable_value(preset, EqPreset::Off, EqPreset::Off.label());
+                ui.selectable_value(preset, EqPreset::Dialogue, EqPreset::Dialogue.label());
+            });
+        ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+            ui.add_space(12.0);
+            if ui.small_button("RESET").clicked() {
+                gains_db.fill(0.0);
+                *frequencies_hz = EqProfile::default_frequencies();
+                *point_count = EQ_BAND_COUNT as u8;
+                *preset = *base_preset;
+                *active_handle = None;
+                committed = true;
+            }
+        });
+    });
+
+    if *preset != previous_preset {
+        *base_preset = *preset;
+        gains_db.fill(0.0);
+        *frequencies_hz = EqProfile::default_frequencies();
+        *point_count = EQ_BAND_COUNT as u8;
+        *active_handle = None;
+        committed = true;
+    }
+    *point_count = (*point_count).clamp(1, EQ_MAX_POINTS as u8);
+    let model_points = *point_count as usize;
+
+    let (rect, response) = ui.allocate_exact_size(
+        egui::vec2(CONTENT_WIDTH, EQ_GRAPH_HEIGHT),
+        egui::Sense::click_and_drag(),
+    );
+    let response = response.on_hover_cursor(egui::CursorIcon::Crosshair);
+    let graph = egui::Rect::from_min_max(
+        rect.min + egui::vec2(42.0, 10.0),
+        rect.max - egui::vec2(12.0, 26.0),
+    );
+    let painter = ui.painter_at(rect);
+    painter.rect_filled(rect.shrink(2.0), 4.0, DARK0_HARD);
+
+    const MIN_DB: f32 = -36.0;
+    const MAX_DB: f32 = 18.0;
+    let x_for_frequency = |frequency: f32| {
+        let amount = (frequency / 20.0).ln() / (20_000.0_f32 / 20.0).ln();
+        egui::lerp(graph.x_range(), amount.clamp(0.0, 1.0))
+    };
+    let frequency_for_x = |x: f32| {
+        let amount = ((x - graph.left()) / graph.width()).clamp(0.0, 1.0);
+        20.0 * (20_000.0_f32 / 20.0).powf(amount)
+    };
+    let y_for_db = |db: f32| {
+        egui::lerp(
+            graph.y_range(),
+            ((MAX_DB - db) / (MAX_DB - MIN_DB)).clamp(0.0, 1.0),
+        )
+    };
+    let db_for_y =
+        |y: f32| MAX_DB - ((y - graph.top()) / graph.height()).clamp(0.0, 1.0) * (MAX_DB - MIN_DB);
+
+    for db in [-30.0, -18.0, -6.0, 0.0, 6.0, 12.0] {
+        let y = y_for_db(db);
+        let color = if db == 0.0 { DARK2 } else { DARK0_SOFT };
+        painter.line_segment(
+            [egui::pos2(graph.left(), y), egui::pos2(graph.right(), y)],
+            egui::Stroke::new(1.0_f32, color),
+        );
+        painter.text(
+            egui::pos2(graph.left() - 6.0, y),
+            egui::Align2::RIGHT_CENTER,
+            format!("{db:+.0}"),
+            egui::FontId::new(8.0, egui::FontFamily::Monospace),
+            LIGHT3,
+        );
+    }
+
+    for (index, frequency) in frequencies_hz
+        .iter()
+        .copied()
+        .take(model_points)
+        .enumerate()
+    {
+        let x = x_for_frequency(frequency);
+        painter.line_segment(
+            [egui::pos2(x, graph.top()), egui::pos2(x, graph.bottom())],
+            egui::Stroke::new(0.5_f32, DARK0_SOFT),
+        );
+        let show_label = index == 0 || index + 1 == model_points || index % 3 == 1;
+        if show_label {
+            painter.text(
+                egui::pos2(x, graph.bottom() + 9.0),
+                egui::Align2::CENTER_CENTER,
+                frequency_label(frequency),
+                egui::FontId::new(8.0, egui::FontFamily::Monospace),
+                LIGHT3,
+            );
+        }
+    }
+
+    let displayed_base = if *preset == EqPreset::Custom {
+        *base_preset
+    } else {
+        *preset
+    };
+    let custom_displayed = *preset == EqPreset::Custom;
+    let displayed_frequencies = *frequencies_hz;
+    let displayed_point_count = model_points;
+    let base_at = |frequency: f32| {
+        if displayed_base == EqPreset::Dialogue {
+            sampled_values(frequency, &EQ_BAND_FREQUENCIES, vocals_response)
+        } else {
+            0.0
+        }
+    };
+    let gain_at = |frequency: f32, gains: &[f32; EQ_MAX_POINTS]| {
+        if custom_displayed {
+            sampled_values(
+                frequency,
+                &displayed_frequencies[..displayed_point_count],
+                &gains[..displayed_point_count],
+            )
+        } else {
+            0.0
+        }
+    };
+
+    let mut curve = Vec::with_capacity(161);
+    for point in 0..=160 {
+        let amount = point as f32 / 160.0;
+        let frequency = 20.0 * (20_000.0_f32 / 20.0).powf(amount);
+        let db = base_at(frequency) + gain_at(frequency, gains_db);
+        curve.push(egui::pos2(x_for_frequency(frequency), y_for_db(db)));
+    }
+    let mut fill = curve.clone();
+    fill.push(egui::pos2(graph.right(), y_for_db(MIN_DB)));
+    fill.push(egui::pos2(graph.left(), y_for_db(MIN_DB)));
+    painter.add(egui::Shape::convex_polygon(
+        fill,
+        BRIGHT_BLUE.gamma_multiply(0.10),
+        egui::Stroke::NONE,
+    ));
+    painter.add(egui::Shape::line(
+        curve,
+        egui::Stroke::new(2.0_f32, BRIGHT_BLUE),
+    ));
+
+    if (response.drag_started() || response.clicked())
+        && let Some(pointer) = response.interact_pointer_pos()
+    {
+        *active_handle = None;
+        let nearest = (0..model_points).min_by(|left, right| {
+            let left_distance = (x_for_frequency(frequencies_hz[*left]) - pointer.x).abs();
+            let right_distance = (x_for_frequency(frequencies_hz[*right]) - pointer.x).abs();
+            left_distance.total_cmp(&right_distance)
+        });
+        let existing = nearest
+            .filter(|index| (x_for_frequency(frequencies_hz[*index]) - pointer.x).abs() <= 8.0);
+        if let Some(index) = existing {
+            *active_handle = Some(index);
+        } else if model_points < EQ_MAX_POINTS {
+            if *preset != EqPreset::Custom {
+                *base_preset = *preset;
+                gains_db.fill(0.0);
+                *preset = EqPreset::Custom;
+            }
+            let frequency = frequency_for_x(pointer.x);
+            *active_handle = insert_eq_point(
+                point_count,
+                frequencies_hz,
+                gains_db,
+                frequency,
+                db_for_y(pointer.y) - base_at(frequency),
+            );
+        }
+    }
+    if (response.dragged() || response.clicked())
+        && let (Some(index), Some(pointer)) = (*active_handle, response.interact_pointer_pos())
+    {
+        if *preset != EqPreset::Custom {
+            *base_preset = *preset;
+            gains_db.fill(0.0);
+            *preset = EqPreset::Custom;
+        }
+        let target = db_for_y(pointer.y);
+        gains_db[index] = (target - base_at(frequencies_hz[index])).clamp(-12.0, 12.0);
+        if response.clicked() {
+            committed = true;
+            *active_handle = None;
+        }
+    }
+    if response.drag_stopped() {
+        committed = active_handle.is_some();
+        *active_handle = None;
+    }
+
+    for (index, frequency) in frequencies_hz
+        .iter()
+        .copied()
+        .take(*point_count as usize)
+        .enumerate()
+    {
+        let db = base_at(frequency) + gain_at(frequency, gains_db);
+        let center = egui::pos2(x_for_frequency(frequency), y_for_db(db));
+        let selected = *active_handle == Some(index);
+        painter.circle_filled(center, if selected { 5.0 } else { 3.5 }, DARK0_HARD);
+        painter.circle_stroke(
+            center,
+            if selected { 5.0 } else { 3.5 },
+            egui::Stroke::new(1.5_f32, if selected { LIGHT0 } else { BRIGHT_BLUE }),
+        );
+    }
+
+    if response.hovered()
+        && let Some(pointer) = response.hover_pos()
+        && let Some(index) = (0..*point_count as usize).min_by(|left, right| {
+            let left_distance = (x_for_frequency(frequencies_hz[*left]) - pointer.x).abs();
+            let right_distance = (x_for_frequency(frequencies_hz[*right]) - pointer.x).abs();
+            left_distance.total_cmp(&right_distance)
+        })
+    {
+        let existing_frequency = frequencies_hz[index];
+        let near_existing = (x_for_frequency(existing_frequency) - pointer.x).abs() <= 8.0;
+        let frequency = if near_existing {
+            existing_frequency
+        } else {
+            frequency_for_x(pointer.x)
+        };
+        let db = base_at(frequency) + gain_at(frequency, gains_db);
+        let hint = if near_existing {
+            "Click or drag vertically to adjust this point"
+        } else if (*point_count as usize) < EQ_MAX_POINTS {
+            "Click to add a point here"
+        } else {
+            "Point storage is full"
+        };
+        response.clone().on_hover_text(format!(
+            "{}  {db:+.1} dB\n{hint}",
+            frequency_label(frequency)
+        ));
+    }
+
+    committed
+}
+
+fn sampled_values(frequency: f32, frequencies: &[f32], values: &[f32]) -> f32 {
+    if frequency <= frequencies[0] {
+        return values[0];
+    }
+    if frequency >= *frequencies.last().unwrap() {
+        return *values.last().unwrap();
+    }
+    for index in 0..frequencies.len() - 1 {
+        if frequency <= frequencies[index + 1] {
+            let low = frequencies[index].ln();
+            let high = frequencies[index + 1].ln();
+            if high <= low {
+                continue;
+            }
+            let amount = (frequency.ln() - low) / (high - low);
+            return values[index] + (values[index + 1] - values[index]) * amount;
+        }
+    }
+    *values.last().unwrap()
+}
+
+fn insert_eq_point(
+    point_count: &mut u8,
+    frequencies_hz: &mut [f32; EQ_MAX_POINTS],
+    gains_db: &mut [f32; EQ_MAX_POINTS],
+    frequency: f32,
+    gain_db: f32,
+) -> Option<usize> {
+    let count = *point_count as usize;
+    if count >= EQ_MAX_POINTS {
+        return None;
+    }
+    let frequency = frequency.clamp(20.0, 20_000.0);
+    let insertion = frequencies_hz[..count].partition_point(|value| *value < frequency);
+    for index in (insertion..count).rev() {
+        frequencies_hz[index + 1] = frequencies_hz[index];
+        gains_db[index + 1] = gains_db[index];
+    }
+    frequencies_hz[insertion] = frequency;
+    gains_db[insertion] = gain_db.clamp(-12.0, 12.0);
+    *point_count += 1;
+    Some(insertion)
+}
+
+fn frequency_label(frequency: f32) -> String {
+    if frequency >= 1_000.0 {
+        let khz = frequency / 1_000.0;
+        if khz.fract().abs() < 0.05 {
+            format!("{khz:.0}k")
+        } else {
+            format!("{khz:.1}k")
+        }
+    } else {
+        format!("{frequency:.0}")
+    }
+}
+
+#[cfg(test)]
+mod eq_control_tests {
+    use super::*;
+
+    #[test]
+    fn inserts_a_new_point_at_its_frequency() {
+        let mut count = EQ_BAND_COUNT as u8;
+        let mut frequencies = EqProfile::default_frequencies();
+        let mut gains = [0.0; EQ_MAX_POINTS];
+
+        let inserted = insert_eq_point(&mut count, &mut frequencies, &mut gains, 750.0, 4.5);
+
+        let inserted = inserted.unwrap();
+        assert_eq!(count, 32);
+        assert_eq!(frequencies[inserted], 750.0);
+        assert_eq!(gains[inserted], 4.5);
     }
 }
 

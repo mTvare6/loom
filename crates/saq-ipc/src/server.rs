@@ -38,7 +38,7 @@ impl EventNotifier {
 
     fn register(&self, waker: Arc<Waker>) -> (u64, Option<Event>) {
         let mut inner = self.inner.lock().unwrap();
-        let snapshot = (inner.version, inner.event);
+        let snapshot = (inner.version, inner.event.clone());
         inner.wakers.push(waker);
         snapshot
     }
@@ -63,7 +63,7 @@ impl EventNotifier {
 
     fn snapshot(&self) -> (u64, Option<Event>) {
         let inner = self.inner.lock().unwrap();
-        (inner.version, inner.event)
+        (inner.version, inner.event.clone())
     }
 }
 
@@ -203,12 +203,11 @@ fn handle_client<F: Fn(Request) -> (Response, Option<Event>) + Send + Sync + 'st
                         let (version, event) = notifier.snapshot();
                         if version > last_seen_version {
                             last_seen_version = version;
-                            if let Some(event) = event {
-                                if let Err(e) =
+                            if let Some(event) = event
+                                && let Err(e) =
                                     queue_server_msg(&mut out_buf, &ServerMsg::Event(event))
-                                {
-                                    break 'outer Err(e);
-                                }
+                            {
+                                break 'outer Err(e);
                             }
                         }
                     }

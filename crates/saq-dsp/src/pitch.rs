@@ -1,9 +1,9 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use crate::SAMPLE_RATE;
 use signalsmith_stretch::Stretch;
 
 const CHANNELS: u32 = 2;
-const PROCESS_RATE: u32 = 48_000;
 const TONALITY_LIMIT_HZ: f32 = 8_000.0;
 const MAX_CHUNK_FRAMES: usize = 4_096;
 
@@ -17,14 +17,14 @@ pub struct PitchEngine {
 impl PitchEngine {
     pub fn new() -> Box<Self> {
         let mut engine = Box::new(Self {
-            stretch: Stretch::preset_default(CHANNELS, PROCESS_RATE),
+            stretch: Stretch::preset_default(CHANNELS, SAMPLE_RATE),
             interleaved_input: vec![0.0; MAX_CHUNK_FRAMES * CHANNELS as usize].into_boxed_slice(),
             interleaved_output: vec![0.0; MAX_CHUNK_FRAMES * CHANNELS as usize].into_boxed_slice(),
             semitones: 0.0,
         });
         engine
             .stretch
-            .set_transpose_factor_semitones(0.0, Some(TONALITY_LIMIT_HZ / PROCESS_RATE as f32));
+            .set_transpose_factor_semitones(0.0, Some(TONALITY_LIMIT_HZ / SAMPLE_RATE as f32));
         engine.stretch.process(
             &engine.interleaved_input[..],
             &mut engine.interleaved_output[..],
@@ -47,7 +47,7 @@ impl PitchEngine {
             // 12 semitone is an octave
             self.stretch.set_transpose_factor_semitones(
                 semitones,
-                Some(TONALITY_LIMIT_HZ / PROCESS_RATE as f32),
+                Some(TONALITY_LIMIT_HZ / SAMPLE_RATE as f32),
             );
             self.semitones = semitones;
         }
@@ -95,9 +95,9 @@ mod tests {
     #[test]
     fn shifts_pitch_without_changing_frame_count_or_stereo_relation() {
         let mut engine = PitchEngine::new();
-        let frames = PROCESS_RATE as usize * 3;
+        let frames = SAMPLE_RATE as usize * 3;
         let mut left: Vec<_> = (0..frames)
-            .map(|index| (TAU * 440.0 * index as f32 / PROCESS_RATE as f32).sin() * 0.2)
+            .map(|index| (TAU * 440.0 * index as f32 / SAMPLE_RATE as f32).sin() * 0.2)
             .collect();
         let mut right = left.clone();
         for start in (0..frames).step_by(512) {
@@ -107,8 +107,8 @@ mod tests {
 
         assert_eq!(left.len(), frames);
         assert_eq!(right.len(), frames);
-        let settled = engine.latency_frames() + PROCESS_RATE as usize;
-        let frequency = dominant_frequency(&left[settled..], PROCESS_RATE as f32);
+        let settled = engine.latency_frames() + SAMPLE_RATE as usize;
+        let frequency = dominant_frequency(&left[settled..], SAMPLE_RATE as f32);
         assert!((frequency - 880.0).abs() < 3.0, "measured {frequency} Hz");
         let stereo_error = left[settled..]
             .iter()

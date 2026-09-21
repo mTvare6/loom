@@ -1,8 +1,7 @@
 // SPDX-License-Identifier: MPL-2.0
 
-use crate::convolution::StereoFir;
+use crate::{SAMPLE_RATE, convolution::StereoFir};
 
-const SAMPLE_RATE: f32 = 48_000.0;
 const THRESHOLD_DBFS: f32 = -16.523_478;
 const GAIN_REDUCTION_SLOPE: f32 = 0.757_800_04;
 const ATTACK_SECONDS: f32 = 0.013_295_716;
@@ -21,8 +20,8 @@ impl NightEngine {
             fir: StereoFir::new(load_zeroed_diagnol_hrtf!("night")),
 
             detector_power: 0.0,
-            attack_coefficient: (-1.0 / (ATTACK_SECONDS * SAMPLE_RATE)).exp(),
-            release_coefficient: (-1.0 / (RELEASE_SECONDS * SAMPLE_RATE)).exp(),
+            attack_coefficient: (-1.0 / (ATTACK_SECONDS * SAMPLE_RATE as f32)).exp(),
+            release_coefficient: (-1.0 / (RELEASE_SECONDS * SAMPLE_RATE as f32)).exp(),
         })
     }
 
@@ -62,7 +61,7 @@ mod tests {
     fn anti_phase_signal_does_not_drive_linked_detector() {
         let mut anti_phase = NightEngine::new();
         let mut in_phase = NightEngine::new();
-        for _ in 0..48_000 {
+        for _ in 0..SAMPLE_RATE {
             anti_phase.process(0.5, -0.5);
             in_phase.process(0.5, 0.5);
         }

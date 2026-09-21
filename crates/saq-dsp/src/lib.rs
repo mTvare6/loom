@@ -53,6 +53,8 @@ macro_rules! load_zeroed_diagnol_hrtf {
     }};
 }
 
+pub const SAMPLE_RATE: u32 = 48_000;
+
 mod room;
 mod biquad;
 mod convolution;
@@ -61,6 +63,7 @@ mod crossover;
 mod decorrelator;
 mod delay;
 mod early_reflections;
+mod eq;
 mod fft;
 mod clarity;
 mod itd;
@@ -75,6 +78,7 @@ mod surround;
 
 pub use room::RoomEngine;
 pub use biquad::Biquad;
+pub use eq::{EQ_BAND_COUNT, EQ_BAND_FREQUENCIES, EQ_MAX_POINTS, EqEngine, EqPreset, EqProfile};
 pub use clarity::ClarityEngine;
 pub use mode::Mode;
 pub use night::NightEngine;
