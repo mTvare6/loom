@@ -1,15 +1,14 @@
-use std::collections::VecDeque;
 use std::io::{self, BufRead, BufReader, ErrorKind, Write};
 use std::os::unix::net::UnixStream;
 use std::path::Path;
 use std::time::Duration;
 
-use crate::{Event, Frame, Request, Response};
+use crate::{Event, Request, Response, ServerMsg};
 
 pub struct IpcClient {
     stream: BufReader<UnixStream>,
-    in_line: String,
-    pending_events: VecDeque<Event>,
+    pending_line: String,
+    pending_event: Option<Event>,
 }
 
 impl IpcClient {
@@ -17,16 +16,12 @@ impl IpcClient {
         let stream = UnixStream::connect(path)?;
         Ok(Self {
             stream: BufReader::new(stream),
-            in_line: String::new(),
-            pending_events: VecDeque::new(),
+            pending_line: String::new(),
+            pending_event: None,
         })
     }
 
     pub fn send(&mut self, request: Request) -> io::Result<Response> {
-        self.stream
-            .get_ref()
-            .set_read_timeout(Some(Duration::from_secs(2)))?;
-
         let mut msg = serde_json::to_string(&request)?;
         msg.push('\n');
 
@@ -34,59 +29,51 @@ impl IpcClient {
         self.stream.get_ref().flush()?;
 
         loop {
-            self.in_line.clear();
-            let bytes_read = self.stream.read_line(&mut self.in_line)?;
-
-            if bytes_read == 0 {
-                return Err(io::Error::new(
-                    ErrorKind::UnexpectedEof,
-                    "server closed connection",
-                ));
-            }
-
-            match serde_json::from_str::<Frame>(&self.in_line) {
-                Ok(Frame::Response(response)) => return Ok(response),
-                Ok(Frame::Event(event)) => {
-                    self.pending_events.push_back(event);
-                }
-                Err(err) => {
-                    return Err(io::Error::new(
-                        ErrorKind::InvalidData,
-                        format!("Failed to parse frame: {err}"),
-                    ));
+            match self.read_frame(Duration::from_secs(2))? {
+                ServerMsg::Response(response) => return Ok(response),
+                ServerMsg::Event(event) => {
+                    self.pending_event = Some(event);
                 }
             }
         }
     }
 
     pub fn try_recv_event(&mut self, timeout: Duration) -> io::Result<Event> {
-        if let Some(event) = self.pending_events.pop_front() {
+        if let Some(event) = self.pending_event.take() {
             return Ok(event);
         }
 
+        match self.read_frame(timeout)? {
+            ServerMsg::Event(event) => Ok(event),
+            ServerMsg::Response(_) => Err(io::Error::new(
+                ErrorKind::WouldBlock,
+                "a stale Response arrived instead of an Event",
+            )),
+        }
+    }
+
+    fn read_frame(&mut self, timeout: Duration) -> io::Result<ServerMsg> {
         self.stream.get_ref().set_read_timeout(Some(timeout))?;
 
-        self.in_line.clear();
-        match self.stream.read_line(&mut self.in_line) {
-            Ok(0) => Err(io::Error::new(
-                ErrorKind::UnexpectedEof,
-                "server closed connection",
-            )),
-            Ok(_) => match serde_json::from_str::<Frame>(&self.in_line) {
-                Ok(Frame::Event(event)) => Ok(event),
-                Ok(Frame::Response(_)) => Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    "unexpected response frame while reading events",
-                )),
-                Err(err) => Err(io::Error::new(
-                    ErrorKind::InvalidData,
-                    format!("Failed to parse frame: {err}"),
-                )),
-            },
-            Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
-                Err(io::Error::new(ErrorKind::WouldBlock, "no events ready"))
+        loop {
+            match self.stream.read_line(&mut self.pending_line) {
+                Ok(0) => {
+                    return Err(io::Error::new(
+                        ErrorKind::UnexpectedEof,
+                        "server closed connection",
+                    ));
+                }
+                Ok(_) => {
+                    let frame = serde_json::from_str::<ServerMsg>(&self.pending_line);
+                    self.pending_line.clear();
+                    return frame.map_err(io::Error::from);
+                }
+                Err(e) if e.kind() == ErrorKind::WouldBlock || e.kind() == ErrorKind::TimedOut => {
+                    return Err(e);
+                }
+                Err(e) if e.kind() == ErrorKind::Interrupted => continue,
+                Err(e) => return Err(e),
             }
-            Err(e) => Err(e),
         }
     }
 }

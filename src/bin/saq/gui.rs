@@ -78,6 +78,9 @@ fn handle_response(response: std::io::Result<Response>) {
         Err(err) => {
             eprintln!("Śaq daemon error: {}", err)
         }
+        Ok(Response::Error(error)) => {
+            eprintln!("Error: {}", error);
+        }
         _ => {}
     }
 }

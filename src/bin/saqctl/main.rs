@@ -27,8 +27,8 @@ fn handle_response(response: std::io::Result<Response>) {
         Ok(Response::Ok) => {
             println!("Ok");
         }
-        Ok(Response::Error) => {
-            eprintln!("saqd: request failed");
+        Ok(Response::Error(error)) => {
+            eprintln!("Error: {}", error);
         }
         Ok(Response::State {
             volume,
