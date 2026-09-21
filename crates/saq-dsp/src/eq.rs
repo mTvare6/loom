@@ -20,14 +20,76 @@ pub enum EqPreset {
     #[default]
     Off = 0,
     Dialogue = 1,
-    Custom = 2,
+    Acoustic = 2,
+    BassBoost = 3,
+    Orchestral = 4,
+    Party = 5,
+    Electronic = 6,
+    Gaming = 7,
+    HipHop = 8,
+    House = 9,
+    Jazz = 10,
+    Cinema = 11,
+    Pop = 12,
+    Rock = 13,
+    TrebleBoost = 14,
+    #[cfg_attr(feature = "cli", value(skip))]
+    Custom = 15,
 }
 
 impl EqPreset {
+    const FILTERS: [Self; 14] = [
+        Self::Dialogue,
+        Self::Acoustic,
+        Self::BassBoost,
+        Self::Orchestral,
+        Self::Party,
+        Self::Electronic,
+        Self::Gaming,
+        Self::HipHop,
+        Self::House,
+        Self::Jazz,
+        Self::Cinema,
+        Self::Pop,
+        Self::Rock,
+        Self::TrebleBoost,
+    ];
+
+    pub const SELECTABLE: [Self; 15] = [
+        Self::Off,
+        Self::Acoustic,
+        Self::BassBoost,
+        Self::Orchestral,
+        Self::Party,
+        Self::Electronic,
+        Self::Gaming,
+        Self::HipHop,
+        Self::House,
+        Self::Jazz,
+        Self::Cinema,
+        Self::Pop,
+        Self::Rock,
+        Self::TrebleBoost,
+        Self::Dialogue,
+    ];
+
     pub const fn from_u8(value: u8) -> Self {
         match value {
             1 => Self::Dialogue,
-            2 => Self::Custom,
+            2 => Self::Acoustic,
+            3 => Self::BassBoost,
+            4 => Self::Orchestral,
+            5 => Self::Party,
+            6 => Self::Electronic,
+            7 => Self::Gaming,
+            8 => Self::HipHop,
+            9 => Self::House,
+            10 => Self::Jazz,
+            11 => Self::Cinema,
+            12 => Self::Pop,
+            13 => Self::Rock,
+            14 => Self::TrebleBoost,
+            15 => Self::Custom,
             _ => Self::Off,
         }
     }
@@ -37,13 +99,46 @@ impl EqPreset {
             Self::Off => "OFF",
             Self::Dialogue => "DIALOGUE",
             Self::Custom => "CUSTOM",
+            Self::Acoustic => "ACOUSTIC",
+            Self::BassBoost => "BASS BOOST",
+            Self::Party => "PARTY",
+            Self::Electronic => "ELECTRONIC",
+            Self::Gaming => "GAMING",
+            Self::HipHop => "HIP HOP",
+            Self::House => "HOUSE",
+            Self::Jazz => "JAZZ",
+            Self::Cinema => "CINEMA",
+            Self::Pop => "POP",
+            Self::Rock => "ROCK",
+            Self::TrebleBoost => "TREBLE BOOST",
+            Self::Orchestral => "ORCHESTRAL",
         }
     }
 
     pub fn response_db(self, frequencies: &[f32]) -> Vec<f32> {
         match self {
-            Self::Off => vec![0.0; frequencies.len()],
-            Self::Dialogue | Self::Custom => EqImpulse::dialogue().response_db(frequencies),
+            Self::Off | Self::Custom => vec![0.0; frequencies.len()],
+            preset => EqImpulse::for_preset(preset).response_db(frequencies),
+        }
+    }
+
+    const fn filter_index(self) -> Option<usize> {
+        match self {
+            Self::Dialogue => Some(0),
+            Self::Acoustic => Some(1),
+            Self::BassBoost => Some(2),
+            Self::Orchestral => Some(3),
+            Self::Party => Some(4),
+            Self::Electronic => Some(5),
+            Self::Gaming => Some(6),
+            Self::HipHop => Some(7),
+            Self::House => Some(8),
+            Self::Jazz => Some(9),
+            Self::Cinema => Some(10),
+            Self::Pop => Some(11),
+            Self::Rock => Some(12),
+            Self::TrebleBoost => Some(13),
+            Self::Off | Self::Custom => None,
         }
     }
 }
@@ -153,8 +248,24 @@ impl EqProfile {
 struct EqImpulse([[Vec<f32>; 2]; 2]);
 
 impl EqImpulse {
-    fn dialogue() -> Self {
-        Self(load_zeroed_diagnol_hrtf!("eq/dialogue"))
+    fn for_preset(preset: EqPreset) -> Self {
+        Self(match preset {
+            EqPreset::Dialogue => load_zeroed_diagnol_hrtf!("eq/dialogue"),
+            EqPreset::Acoustic => load_zeroed_diagnol_hrtf!("eq/acoustic"),
+            EqPreset::BassBoost => load_zeroed_diagnol_hrtf!("eq/bassboost"),
+            EqPreset::Orchestral => load_zeroed_diagnol_hrtf!("eq/orchestral"),
+            EqPreset::Party => load_zeroed_diagnol_hrtf!("eq/party"),
+            EqPreset::Electronic => load_zeroed_diagnol_hrtf!("eq/electronic"),
+            EqPreset::Gaming => load_zeroed_diagnol_hrtf!("eq/gaming"),
+            EqPreset::HipHop => load_zeroed_diagnol_hrtf!("eq/hiphop"),
+            EqPreset::House => load_zeroed_diagnol_hrtf!("eq/house"),
+            EqPreset::Jazz => load_zeroed_diagnol_hrtf!("eq/jazz"),
+            EqPreset::Cinema => load_zeroed_diagnol_hrtf!("eq/cinema"),
+            EqPreset::Pop => load_zeroed_diagnol_hrtf!("eq/pop"),
+            EqPreset::Rock => load_zeroed_diagnol_hrtf!("eq/rock"),
+            EqPreset::TrebleBoost => load_zeroed_diagnol_hrtf!("eq/trebleboost"),
+            EqPreset::Off | EqPreset::Custom => unreachable!("preset has no measured response"),
+        })
     }
 
     fn identity(length: usize) -> Self {
@@ -220,9 +331,23 @@ impl EqImpulse {
     }
 }
 
+struct PresetFilter {
+    impulses: EqImpulse,
+    fir: Box<StereoFir>,
+}
+
+impl PresetFilter {
+    fn new(preset: EqPreset) -> Self {
+        let impulses = EqImpulse::for_preset(preset);
+        Self {
+            fir: StereoFir::new(impulses.clone().into_inner()),
+            impulses,
+        }
+    }
+}
+
 pub struct EqEngine {
-    vocals_impulses: EqImpulse,
-    dialogue: Box<StereoFir>,
+    presets: [PresetFilter; 14],
     // TODO: Add saves and loaf for custom allowing more than one custom.
     custom: Option<Box<StereoFir>>,
     active_profile: EqProfile,
@@ -230,10 +355,8 @@ pub struct EqEngine {
 
 impl EqEngine {
     pub fn new() -> Box<Self> {
-        let vocals_impulses = EqImpulse::dialogue();
         Box::new(Self {
-            dialogue: StereoFir::new(vocals_impulses.clone().into_inner()),
-            vocals_impulses,
+            presets: EqPreset::FILTERS.map(PresetFilter::new),
             custom: None,
             active_profile: EqProfile::default(),
         })
@@ -249,12 +372,11 @@ impl EqEngine {
             return;
         }
         if profile.preset == EqPreset::Custom {
-            let mut impulses = match profile.base_preset {
-                EqPreset::Dialogue => self.vocals_impulses.clone(),
-                EqPreset::Off | EqPreset::Custom => {
-                    EqImpulse::identity(self.vocals_impulses.length())
-                }
-            };
+            let mut impulses = profile
+                .base_preset
+                .filter_index()
+                .map(|index| self.presets[index].impulses.clone())
+                .unwrap_or_else(|| EqImpulse::identity(self.presets[0].impulses.length()));
             impulses.apply_profile(&profile);
             self.custom = Some(StereoFir::new(impulses.into_inner()));
         }
@@ -264,18 +386,22 @@ impl EqEngine {
 
     #[inline]
     pub fn process(&mut self, left: f32, right: f32) -> (f32, f32) {
-        match self.active_profile.preset {
-            EqPreset::Off => (left, right),
-            EqPreset::Dialogue => self.dialogue.process(left, right),
-            EqPreset::Custom => self
-                .custom
+        let preset = self.active_profile.preset;
+        if let Some(index) = preset.filter_index() {
+            self.presets[index].fir.process(left, right)
+        } else if preset == EqPreset::Custom {
+            self.custom
                 .as_mut()
-                .map_or((left, right), |filter| filter.process(left, right)),
+                .map_or((left, right), |filter| filter.process(left, right))
+        } else {
+            (left, right)
         }
     }
 
     pub fn reset(&mut self) {
-        self.dialogue.reset();
+        for preset in &mut self.presets {
+            preset.fir.reset();
+        }
         if let Some(custom) = &mut self.custom {
             custom.reset();
         }

@@ -7,10 +7,9 @@ use std::fmt;
 #[repr(u8)]
 pub enum Mode {
     Off = 0,
-    SpatialFilter = 1,
     #[default]
-    #[cfg_attr(feature = "cli", value(name = "surround-3d"))]
-    SurroundSound = 2,
+    SurroundSound = 1,
+    SpatialFilter = 2,
     Room = 3,
     Clarity = 4,
     Night = 5,
@@ -21,8 +20,8 @@ pub enum Mode {
 impl Mode {
     pub const fn from_u8(value: u8) -> Self {
         match value {
-            1 => Self::SpatialFilter,
-            2 => Self::SurroundSound,
+            1 => Self::SurroundSound,
+            2 => Self::SpatialFilter,
             3 => Self::Room,
             4 => Self::Clarity,
             5 => Self::Night,
@@ -38,7 +37,7 @@ impl fmt::Display for Mode {
         formatter.write_str(match self {
             Self::Off => "off",
             Self::SpatialFilter => "spatial-filter",
-            Self::SurroundSound => "surround-3d",
+            Self::SurroundSound => "surround-sound",
             Self::Room => "room",
             Self::Clarity => "clarity",
             Self::Night => "night",

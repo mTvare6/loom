@@ -100,7 +100,7 @@ pub fn run_gui(socket: impl AsRef<Path>) -> eframe::Result<()> {
                 eq_point_count,
                 eq_frequencies_hz,
                 eq_gains_db,
-                vocals_response: EqPreset::Dialogue
+                eq_base_response: eq_base_preset
                     .response_db(&EQ_BAND_FREQUENCIES)
                     .try_into()
                     .expect("31 EQ response points"),
@@ -160,7 +160,7 @@ struct SaqApp {
     eq_point_count: u8,
     eq_frequencies_hz: [f32; EQ_MAX_POINTS],
     eq_gains_db: [f32; EQ_MAX_POINTS],
-    vocals_response: [f32; EQ_BAND_COUNT],
+    eq_base_response: [f32; EQ_BAND_COUNT],
     active_eq_handle: Option<usize>,
     window_size_initialized: bool,
 }
@@ -189,6 +189,11 @@ impl SaqApp {
                     self.subwoofer = subwoofer;
                     self.eq_preset = EqPreset::from_u8(eq_preset);
                     self.eq_base_preset = EqPreset::from_u8(eq_base_preset);
+                    self.eq_base_response = self
+                        .eq_base_preset
+                        .response_db(&EQ_BAND_FREQUENCIES)
+                        .try_into()
+                        .expect("31 EQ response points");
                     self.eq_point_count = eq_point_count;
                     self.eq_frequencies_hz =
                         array_from_vec(eq_frequencies_hz, EqProfile::default_frequencies());
@@ -226,7 +231,7 @@ impl eframe::App for SaqApp {
                         gains_db: &mut self.eq_gains_db,
                         active_handle: &mut self.active_eq_handle,
                     },
-                    &self.vocals_response,
+                    &mut self.eq_base_response,
                 );
 
                 let (
@@ -362,7 +367,7 @@ struct EqControl<'a> {
 fn eq_control(
     ui: &mut egui::Ui,
     control: EqControl<'_>,
-    vocals_response: &[f32; EQ_BAND_COUNT],
+    base_response: &mut [f32; EQ_BAND_COUNT],
 ) -> bool {
     let EqControl {
         preset,
@@ -385,8 +390,9 @@ fn eq_control(
             .selected_text(preset.label())
             .width(112.0)
             .show_ui(ui, |ui| {
-                ui.selectable_value(preset, EqPreset::Off, EqPreset::Off.label());
-                ui.selectable_value(preset, EqPreset::Dialogue, EqPreset::Dialogue.label());
+                for option in EqPreset::SELECTABLE {
+                    ui.selectable_value(preset, option, option.label());
+                }
             });
         ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
             ui.add_space(12.0);
@@ -403,6 +409,10 @@ fn eq_control(
 
     if *preset != previous_preset {
         *base_preset = *preset;
+        *base_response = preset
+            .response_db(&EQ_BAND_FREQUENCIES)
+            .try_into()
+            .expect("31 EQ response points");
         gains_db.fill(0.0);
         *frequencies_hz = EqProfile::default_frequencies();
         *point_count = EQ_BAND_COUNT as u8;
@@ -491,8 +501,8 @@ fn eq_control(
     let displayed_frequencies = *frequencies_hz;
     let displayed_point_count = model_points;
     let base_at = |frequency: f32| {
-        if displayed_base == EqPreset::Dialogue {
-            sampled_values(frequency, &EQ_BAND_FREQUENCIES, vocals_response)
+        if displayed_base != EqPreset::Off {
+            sampled_values(frequency, &EQ_BAND_FREQUENCIES, base_response)
         } else {
             0.0
         }

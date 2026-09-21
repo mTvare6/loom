@@ -29,8 +29,8 @@ This installs the systemd service and starts the daemon. Start the the GUI with 
 
 ### Roadmap
 
-- [ ] EQ and presets
-  - [ ] Presets
+- [x] EQ and presets
+  - [x] Presets
   - [x] [Controls](https://signalsmith-audio.co.uk/writing/2021/monotonic-smooth-interpolation/) to create custom preset
 - [ ] UX
   - [x] Persistence
@@ -49,7 +49,6 @@ This installs the systemd service and starts the daemon. Start the the GUI with 
       - [x] Arch
       - [ ] Debian
   - [ ] Desktop environment-like projects
-- [ ] Explore additional spatial-audio techniques
 
 ### License
 
