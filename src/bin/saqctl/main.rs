@@ -1,36 +1,89 @@
+use clap::{Parser, Subcommand};
 use saq_dsp::{EqPreset, Mode};
 use saq_ipc::{IpcClient, Request, Response};
+use std::process::ExitCode;
 
-fn print_usage() {
-    println!("saqctl <command> <value>");
-    println!("Commands:");
-    println!("volume <float>\n Sets the volume");
-    println!("mode <mode>\n Mode can be a string or a number. Valid Modes are:");
-    println!("  0 Off");
-    println!("  1 SpatialFilter");
-    println!("  2 SurroundSound");
-    println!("  3 Room");
-    println!("  4 Clarity");
-    println!("  5 Night");
-    println!("  6 SpatialStereo");
-    println!("  7 SpatialSurround");
-    println!("pitch_enabled <bool>");
-    println!(" Enables or disables pitch shifting");
-    println!("pitch <float>");
-    println!(" Sets the pitch");
-    println!("subwoofer <0-1>");
-    println!(" Sets the 3D Surround subwoofer position");
-    println!("eq <off|dialogue>");
-    println!(" Selects an equalizer preset");
+#[derive(Parser)]
+#[command(
+    name = "saqctl",
+    about = "CLI for the Śaq daemon",
+    arg_required_else_help = true,
+    after_help = "Examples:\n  saqctl status\n  saqctl volume 0.75\n  saqctl mode spatial-surround\n  saqctl pitch enable\n  saqctl pitch set -2.5\n  saqctl eq dialogue"
+)]
+struct Cli {
+    #[command(subcommand)]
+    command: Command,
 }
 
-fn handle_response(response: std::io::Result<Response>) {
+#[derive(Subcommand)]
+enum Command {
+    Status,
+    Volume {
+        level: f32,
+    },
+    Mode {
+        mode: Mode,
+    },
+    Pitch {
+        #[command(subcommand)]
+        command: PitchCommand,
+    },
+    Subwoofer {
+        position: f32,
+    },
+    Eq {
+        preset: EqPreset,
+    },
+}
+
+#[derive(Subcommand)]
+enum PitchCommand {
+    Enable,
+    Disable,
+    Set {
+        #[arg(allow_negative_numbers = true)]
+        semitones: f32,
+    },
+}
+
+impl From<Command> for Request {
+    fn from(command: Command) -> Self {
+        match command {
+            Command::Status => Self::GetState,
+            Command::Volume { level } => Self::SetVolume(level),
+            Command::Mode { mode } => Self::SetMode(mode as u8),
+            Command::Pitch { command } => match command {
+                PitchCommand::Enable => Self::SetPitchEnabled(true),
+                PitchCommand::Disable => Self::SetPitchEnabled(false),
+                PitchCommand::Set { semitones } => Self::SetPitch(semitones),
+            },
+            Command::Subwoofer { position } => Self::SetSubwoofer(position),
+            Command::Eq { preset } => Self::SetEqPreset(preset as u8),
+        }
+    }
+}
+
+fn main() -> ExitCode {
+    let cli = Cli::parse();
+    let response = (|| {
+        let mut client = IpcClient::new(
+            saq_ipc::socket_path()
+                .map_err(|error| format!("cannot locate saqd runtime path: {error}"))?,
+        )
+        .map_err(|error| format!("cannot connect to saqd: {error}"))?;
+        client
+            .send(cli.command.into())
+            .map_err(|error| format!("communication with saqd failed: {error}"))
+    })();
+
     match response {
         Ok(Response::Ok) => {
-            println!("Ok");
+            println!("ok");
+            ExitCode::SUCCESS
         }
         Ok(Response::Error(error)) => {
-            eprintln!("Error: {}", error);
+            eprintln!("saqctl: daemon rejected the request: {error}");
+            ExitCode::FAILURE
         }
         Ok(Response::State {
             volume,
@@ -41,102 +94,17 @@ fn handle_response(response: std::io::Result<Response>) {
             eq_preset,
             ..
         }) => {
-            println!("Volume:        {volume}");
-            println!("Mode:          {mode}");
+            println!("Volume:        {volume:.2}");
+            println!("Mode:          {}", Mode::from_u8(mode));
+            println!("Pitch:         {pitch:+.2} semitones");
             println!("Pitch enabled: {pitch_enabled}");
-            println!("Pitch:         {pitch}");
-            println!("Subwoofer:     {subwoofer}");
+            println!("Subwoofer:     {subwoofer:.2}");
             println!("EQ:            {}", EqPreset::from_u8(eq_preset).label());
+            ExitCode::SUCCESS
         }
         Err(error) => {
-            eprintln!("Failed to communicate with saqd: {error}");
+            eprintln!("saqctl: {error}");
+            ExitCode::FAILURE
         }
     }
-}
-
-fn main() {
-    let mut args = std::env::args().skip(1);
-
-    let socket = saq_ipc::socket_path().expect("Could not resolve the Śaq runtime socket");
-    let mut ipc_client = IpcClient::new(socket).expect("Failed to connect to saqd");
-
-    if let Some(command) = args.next() {
-        match command.as_str() {
-            "volume" => {
-                if let Some(volume) = args.next() {
-                    let volume: f32 = volume.parse().expect("Please pass a valid float");
-                    handle_response(ipc_client.send(Request::SetVolume(volume)));
-                } else {
-                    eprintln!("Please provide a float for volume");
-                }
-            }
-            "mode" => {
-                if let Some(mode) = args.next() {
-                    let mode = if let Ok(mode) = mode.parse() {
-                        Mode::from_u8(mode)
-                    } else if let Some(mode) = Mode::from_str(&mode) {
-                        mode
-                    } else {
-                        eprintln!("Please provide a valid mode");
-                        return;
-                    };
-                    handle_response(ipc_client.send(Request::SetMode(mode as u8)));
-                } else {
-                    eprintln!("Please provide a mode as string or number");
-                    print_usage();
-                }
-            }
-            "pitch_enabled" => {
-                if let Some(pitch_enabled) = args.next() {
-                    let pitch_enabled = pitch_enabled.parse().expect("Please pass a valid boolean");
-                    handle_response(ipc_client.send(Request::SetPitchEnabled(pitch_enabled)));
-                } else {
-                    eprintln!("Please provide a boolean for pitch_enabled");
-                }
-            }
-            "pitch" => {
-                if let Some(pitch) = args.next() {
-                    let pitch = pitch.parse().expect("Please provide a float for pitch");
-                    handle_response(ipc_client.send(Request::SetPitch(pitch)));
-                } else {
-                    eprintln!("Please provide a float for pitch");
-                }
-            }
-            "subwoofer" => {
-                if let Some(subwoofer) = args.next() {
-                    let subwoofer = subwoofer.parse().expect("Please provide a float from 0-1");
-                    handle_response(ipc_client.send(Request::SetSubwoofer(subwoofer)));
-                } else {
-                    eprintln!("Please provide a float from 0-1");
-                }
-            }
-            "eq" => {
-                if let Some(preset) = args.next() {
-                    let preset = match preset.to_ascii_lowercase().as_str() {
-                        "off" => EqPreset::Off,
-                        "dialogue" => EqPreset::Dialogue,
-                        _ => {
-                            eprintln!("Please provide a valid preset");
-                            return;
-                        }
-                    };
-                    handle_response(ipc_client.send(Request::SetEqPreset(preset as u8)));
-                } else {
-                    eprintln!("Please provide off or dialogue");
-                }
-            }
-            "get_state" => {
-                handle_response(ipc_client.send(Request::GetState));
-            }
-            "help" => {
-                print_usage();
-            }
-            _ => {
-                eprint!("Invalid command found: {}", command);
-                print_usage();
-            }
-        }
-    }
-
-    drop(ipc_client);
 }

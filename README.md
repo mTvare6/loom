@@ -16,7 +16,7 @@ cargo run --release
 cargo run --bin saq --release
 
 # cli client
-cargo run --bin saqctl --release -- pitch_enabled true
+cargo run --bin saqctl --release -- pitch enable
 ```
 
 ### Installing
@@ -31,14 +31,14 @@ This installs the systemd service and starts the daemon. Start the the GUI with 
 
 - [ ] EQ and presets
   - [ ] Presets
-  - [ ] [Controls](https://signalsmith-audio.co.uk/writing/2021/monotonic-smooth-interpolation/) to create custom preset
+  - [x] [Controls](https://signalsmith-audio.co.uk/writing/2021/monotonic-smooth-interpolation/) to create custom preset
 - [ ] UX
   - [x] Persistence
   - [ ] Non-RT features
   - [x] deamon-mode and IPC support
   - [ ] Configuration files
   - [ ] Detailed IPC error handling
-  - [ ] Better command-line parsing
+  - [x] Better command-line parsing
   - [ ] Colors
 - [ ] PipeWire features
   - [ ] n.1 input (n > 2)
@@ -46,6 +46,8 @@ This installs the systemd service and starts the daemon. Start the the GUI with 
 - [ ] Desktop integration
   - [x] Init system integration
   - [ ] Package mangers support
+      - [x] Arch
+      - [ ] Debian
   - [ ] Desktop environment-like projects
 - [ ] Explore additional spatial-audio techniques
 

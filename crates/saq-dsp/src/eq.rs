@@ -3,6 +3,7 @@
 use crate::SAMPLE_RATE;
 use crate::convolution::StereoFir;
 use crate::fft::{Complex, FourierTransform};
+use std::str::FromStr;
 
 pub const EQ_BAND_COUNT: usize = 31;
 pub const EQ_MAX_POINTS: usize = 128;
@@ -43,6 +44,19 @@ impl EqPreset {
         match self {
             Self::Off => vec![0.0; frequencies.len()],
             Self::Dialogue | Self::Custom => EqImpulse::dialogue().response_db(frequencies),
+        }
+    }
+}
+
+impl FromStr for EqPreset {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "off" => Ok(Self::Off),
+            "dialogue" => Ok(Self::Dialogue),
+            "custom" => Ok(Self::Custom),
+            _ => Err(format!("unknown equalizer preset '{value}'")),
         }
     }
 }

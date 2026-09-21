@@ -1,5 +1,8 @@
 // SPDX-License-Identifier: MPL-2.0
 
+use std::fmt;
+use std::str::FromStr;
+
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Mode {
@@ -27,18 +30,37 @@ impl Mode {
             _ => Self::Off,
         }
     }
+}
 
-    pub fn from_str(s: &str) -> Option<Self> {
-        match s {
-            "Off" => Some(Self::Off),
-            "SpatialFilter" => Some(Self::SpatialFilter),
-            "SurroundSound" => Some(Self::SurroundSound),
-            "Room" => Some(Self::Room),
-            "Clarity" => Some(Self::Clarity),
-            "Night" => Some(Self::Night),
-            "SpatialStereo" => Some(Self::SpatialStereo),
-            "SpatialSurround" => Some(Self::SpatialSurround),
-            _ => None,
+impl FromStr for Mode {
+    type Err = String;
+
+    fn from_str(value: &str) -> Result<Self, Self::Err> {
+        match value {
+            "off" => Ok(Self::Off),
+            "spatial-filter" => Ok(Self::SpatialFilter),
+            "surround-3d" => Ok(Self::SurroundSound),
+            "room" => Ok(Self::Room),
+            "clarity" => Ok(Self::Clarity),
+            "night" => Ok(Self::Night),
+            "spatial-stereo" => Ok(Self::SpatialStereo),
+            "spatial-surround" => Ok(Self::SpatialSurround),
+            _ => Err(format!("unknown mode '{value}'")),
         }
+    }
+}
+
+impl fmt::Display for Mode {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str(match self {
+            Self::Off => "off",
+            Self::SpatialFilter => "spatial-filter",
+            Self::SurroundSound => "surround-3d",
+            Self::Room => "room",
+            Self::Clarity => "clarity",
+            Self::Night => "night",
+            Self::SpatialStereo => "spatial-stereo",
+            Self::SpatialSurround => "spatial-surround",
+        })
     }
 }
