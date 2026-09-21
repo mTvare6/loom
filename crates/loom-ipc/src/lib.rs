@@ -29,7 +29,7 @@ pub enum Request {
     SetSubwoofer(f32),
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum Response {
     State {
         volume: f32,
@@ -39,7 +39,7 @@ pub enum Response {
         subwoofer: f32,
     },
     Ok,
-    Error,
+    Error(String),
 }
 
 #[derive(Clone, Copy, Serialize, Deserialize)]
@@ -53,7 +53,7 @@ pub enum Event {
     },
 }
 
-#[derive(Clone, Copy, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize)]
 pub enum ServerMsg {
     Event(Event),
     Response(Response),

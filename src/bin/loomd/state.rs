@@ -97,6 +97,7 @@ impl AudioState {
         }
     }
 
+    // TODO: Return an error for volume out of bounds and for invalid mode
     pub fn handle_query(&self, request: Request) -> (Response, Option<Event>) {
         match request {
             Request::SetVolume(volume) => {
@@ -126,7 +127,10 @@ impl AudioState {
                     self.set_pitch_semitones(pitch);
                     (Response::Ok, Some(self.updated_event()))
                 } else {
-                    (Response::Error, None)
+                    (
+                        Response::Error("Tried to set pitch but pitch is not enabled".to_string()),
+                        None,
+                    )
                 }
             }
             Request::SetSubwoofer(value) => {

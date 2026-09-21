@@ -223,7 +223,7 @@ fn handle_client<F: Fn(Request) -> (Response, Option<Event>) + Send + Sync + 'st
                                     Ok(request) => notifier.publish_from(|| handler(request)),
                                     Err(error) => {
                                         error!("IPC parse error: {}", error);
-                                        Response::Error
+                                        Response::Error(format!("IPC parse error: {}", error))
                                     }
                                 };
                                 in_line.clear();
