@@ -19,7 +19,7 @@ toml = "1.0"
 serde = { version = "1.0", features = ["derive"] }
 directories = "6.0.0"
 palette = { version = "0.7.7", default-features = false, features = ["std"] }
-saq-dsp = { path = "crates/saq-dsp" }
+saq-dsp = { path = "crates/saq-dsp", features = ["cli"] }
 saq-pipewire = { path = "crates/saq-pipewire" }
 saq-ipc = { path = "crates/saq-ipc" }
 signal-hook = "0.3.18"

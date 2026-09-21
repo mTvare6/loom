@@ -1,14 +1,15 @@
 // SPDX-License-Identifier: MPL-2.0
 
 use std::fmt;
-use std::str::FromStr;
 
+#[cfg_attr(feature = "cli", derive(clap::ValueEnum))]
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 #[repr(u8)]
 pub enum Mode {
     Off = 0,
     SpatialFilter = 1,
     #[default]
+    #[cfg_attr(feature = "cli", value(name = "surround-3d"))]
     SurroundSound = 2,
     Room = 3,
     Clarity = 4,
@@ -28,24 +29,6 @@ impl Mode {
             6 => Self::SpatialStereo,
             7 => Self::SpatialSurround,
             _ => Self::Off,
-        }
-    }
-}
-
-impl FromStr for Mode {
-    type Err = String;
-
-    fn from_str(value: &str) -> Result<Self, Self::Err> {
-        match value {
-            "off" => Ok(Self::Off),
-            "spatial-filter" => Ok(Self::SpatialFilter),
-            "surround-3d" => Ok(Self::SurroundSound),
-            "room" => Ok(Self::Room),
-            "clarity" => Ok(Self::Clarity),
-            "night" => Ok(Self::Night),
-            "spatial-stereo" => Ok(Self::SpatialStereo),
-            "spatial-surround" => Ok(Self::SpatialSurround),
-            _ => Err(format!("unknown mode '{value}'")),
         }
     }
 }

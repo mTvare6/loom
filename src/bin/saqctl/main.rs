@@ -22,6 +22,7 @@ enum Command {
         level: f32,
     },
     Mode {
+        #[arg(value_enum)]
         mode: Mode,
     },
     Pitch {
@@ -32,6 +33,7 @@ enum Command {
         position: f32,
     },
     Eq {
+        #[arg(value_enum)]
         preset: EqPreset,
     },
 }

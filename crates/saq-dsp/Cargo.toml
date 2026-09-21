@@ -4,6 +4,10 @@ version = "0.1.0"
 edition = "2024"
 license = "MPL-2.0"
 
+[features]
+cli = ["dep:clap"]
+
 [dependencies]
+clap = { version = "4.5", features = ["derive"], optional = true }
 rustfft = "6.4.1"
 signalsmith-stretch = "0.1.3"
